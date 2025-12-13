@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v2.0.0** by Backupd.
+Complete usage documentation for **Backupd v2.0.1** by Backupd.
 
 ## Table of Contents
 
@@ -76,7 +76,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v2.0.0
+              Backupd v2.0.1
                     by Backupd
 ========================================================
 
@@ -108,7 +108,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-       Backupd v1.6.2
+              Backupd v2.0.1
                     by Backupd
 ========================================================
 

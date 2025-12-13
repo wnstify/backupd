@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.1] - 2025-12-13
+
+### Fixed
+
+- **Setup completion message** - Now shows `backupd` command instead of `backup-management`
+- **Systemd timer reference** - Status display now uses `backupd-*` pattern
+- **Checksum verification** - Updater now looks for `backupd-v*.tar.gz` filename
+- **Lock file names** - Generated scripts now use `backupd-db.lock` and `backupd-files.lock`
+
+---
+
 ## [2.0.0] - 2025-12-13
 
 ### Changed
