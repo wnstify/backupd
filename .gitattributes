@@ -1,0 +1,4 @@
+# Exclude from release archives (export-ignore)
+docs/ export-ignore
+.github/ export-ignore
+.gitattributes export-ignore

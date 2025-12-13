@@ -1,0 +1,102 @@
+# ============================================================================
+# Backup Management Tool - .gitignore
+# ============================================================================
+
+# ----- Sensitive Files (NEVER commit these) -----
+# Credential files
+.secrets_location
+.config
+.passphrase
+.db.cnf
+.ntfy-token
+
+# Encrypted credential storage
+.c1
+.c2
+.c3
+.c4
+.c5
+.s
+
+# Any file starting with dot in etc pattern
+/etc/.*
+
+# ----- Backup Files -----
+*.tar.gz
+*.tar.gz.gpg
+*.sql
+*.sql.gz
+*_backups/
+db_backups/
+files_backups/
+
+# ----- Log Files -----
+*.log
+logs/
+*_logfile.log
+
+# ----- Temporary Files -----
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.*.swp
+
+# ----- OS Generated -----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ----- IDE / Editor -----
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+*.code-workspace
+.claude
+.claude/*
+CLAUDE_INDEX.md
+
+# ----- Testing -----
+test/
+tests/
+test_*
+*_test.sh
+
+# ----- Development -----
+dev/
+.dev/
+sandbox/
+scratch/
+
+# ----- Distribution -----
+dist/
+build/
+release/
+*.zip
+*.tar
+*.deb
+*.rpm
+
+# ----- Environment -----
+.env
+.env.*
+!.env.example
+*.local
+
+# ----- Misc -----
+*.bak
+*.backup
+*.old
+*.orig
+NOTES.md
+TODO.md
+notes/
