@@ -61,7 +61,7 @@ HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
 RETENTION_MINUTES="%%RETENTION_MINUTES%%"
 
 # Lock file in fixed location
-LOCK_FILE="/var/lock/backup-management-db.lock"
+LOCK_FILE="/var/lock/backupd-db.lock"
 
 SECRET_PASSPHRASE=".c1"
 SECRET_DB_USER=".c2"
@@ -355,7 +355,7 @@ SECRETS_DIR="%%SECRETS_DIR%%"
 LOG_PREFIX="[DB-RESTORE]"
 
 # Use same lock as backup to prevent conflicts
-LOCK_FILE="/var/lock/backup-management-db.lock"
+LOCK_FILE="/var/lock/backupd-db.lock"
 
 SECRET_DB_USER=".c2"
 SECRET_DB_PASS=".c3"
@@ -642,7 +642,7 @@ WEBROOT_SUBDIR="%%WEBROOT_SUBDIR%%"
 RETENTION_MINUTES="%%RETENTION_MINUTES%%"
 
 # Lock file in fixed location
-LOCK_FILE="/var/lock/backup-management-files.lock"
+LOCK_FILE="/var/lock/backupd-files.lock"
 
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
@@ -971,7 +971,7 @@ RCLONE_PATH="%%RCLONE_PATH%%"
 LOG_PREFIX="[FILES-RESTORE]"
 
 # Use same lock as backup to prevent conflicts
-LOCK_FILE="/var/lock/backup-management-files.lock"
+LOCK_FILE="/var/lock/backupd-files.lock"
 
 # Acquire lock (wait up to 60 seconds if backup is running)
 exec 9>"$LOCK_FILE"

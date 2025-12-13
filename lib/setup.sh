@@ -486,10 +486,10 @@ run_setup() {
   echo
   print_success "Backup management system is ready."
   echo
-  echo "You can now use 'backup-management' command from anywhere."
+  echo "You can now use 'backupd' command from anywhere."
   echo
   echo "Systemd timers are managing your backup schedules."
-  echo "View status anytime with: systemctl list-timers backup-management-*"
+  echo "View status anytime with: systemctl list-timers backupd-*"
   echo
 
   press_enter_to_continue

@@ -183,7 +183,7 @@ download_update() {
 
     # Extract expected checksum for our file
     local expected_checksum
-    expected_checksum=$(grep "backup-management-v${version}.tar.gz" "$checksum_file" 2>/dev/null | awk '{print $1}')
+    expected_checksum=$(grep "backupd-v${version}.tar.gz" "$checksum_file" 2>/dev/null | awk '{print $1}')
 
     if [[ -n "$expected_checksum" ]]; then
       local actual_checksum
