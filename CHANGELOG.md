@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2025-12-16
+
+### Security
+
+- **CRITICAL: GPG Passphrase Exposure Fixed** - Encryption passphrases are no longer visible in process list (`ps aux`)
+  - Changed from `--passphrase "$VAR"` to `--passphrase-fd 3 3< <(printf '%s' "$VAR")`
+  - Affects: `lib/generators.sh` (5 locations), `lib/verify.sh` (3 locations)
+  - Risk eliminated: Process snooping attacks
+
+- **CRITICAL: PBKDF2 Iterations Increased to OWASP 2023 Standard**
+  - Changed from 100,000 to 600,000 iterations
+  - Affects: `lib/crypto.sh`, `lib/generators.sh` (6 locations)
+  - Compliant with OWASP 2023 cryptographic storage guidelines
+  - **Breaking Change**: Existing secrets must be re-stored (run `backupd setup`)
+
+- **Added rclone Checksum Verification** - Uploads now verify data integrity
+  - Added `--checksum` flag to all rclone copy operations
+  - Added retry logic: `--retries 3 --low-level-retries 10`
+  - Affects: `lib/generators.sh` (2 locations)
+
+- **Added systemd Service Hardening**
+  - Added `PrivateTmp=yes` to database and files backup services
+  - Provides isolated /tmp for each backup operation
+  - Affects: `lib/schedule.sh` (2 locations)
+
+### Fixed
+
+- **BUG-001: Undefined Variable $WWW_DIR** - Fixed reference to undefined variable
+  - Changed `$WWW_DIR` to `$WEB_PATH_PATTERN` in warning message
+  - Affects: `lib/generators.sh:884`
+
+- **BUG-003: Missing Function Parameters** - Fixed `change_retention_policy()`
+  - Added missing `web_path_pattern` and `webroot_subdir` parameters
+  - Retention policy changes now correctly regenerate files backup script
+  - Affects: `lib/schedule.sh:189-193`
+
+- **BUG-006: Missing Error Exit Flag** - Fixed files backup strict mode
+  - Changed `set -uo pipefail` to `set -euo pipefail`
+  - Files backup now exits on errors instead of continuing with partial backups
+  - Affects: `lib/generators.sh:630`
+
+### Added
+
+- **Comprehensive Documentation**
+  - New `README.md` with full project overview and quick start guide
+  - New `USAGE.md` with detailed usage instructions
+  - New `SECURITY.md` with security architecture and best practices
+  - Project knowledge base in `@docs/` directory
+
+### Changed
+
+- **Improved rclone Error Handling** - Better timeout and retry configuration
+- **Enhanced Logging** - More detailed error messages for debugging
+
+### Breaking Changes
+
+- **PBKDF2 Iteration Count**: Secrets encrypted with 100,000 iterations cannot be decrypted with the new 600,000 iteration code
+  - **Migration Required**: Run `sudo backupd` and select "Reconfigure" to re-store credentials
+  - Alternatively, re-run `sudo backupd setup` for fresh configuration
+  - Existing backups remain valid (they use the stored passphrase, not the iteration count)
+
+### Upgrade Instructions
+
+```bash
+# 1. Update backupd
+sudo backupd --update
+
+# 2. Re-configure to migrate secrets (REQUIRED)
+sudo backupd
+# Select: Reconfigure (option 6)
+# Re-enter your encryption password and database credentials
+
+# 3. Verify configuration
+sudo backupd
+# Select: View status (option 3)
+
+# 4. Test backup
+sudo backupd
+# Select: Run backup now (option 1)
+```
+
+### Security Advisories Addressed
+
+| ID | Severity | Description | Status |
+|----|----------|-------------|--------|
+| SEC-001 | CRITICAL | GPG passphrase visible in `ps aux` | Fixed |
+| SEC-002 | CRITICAL | PBKDF2 iterations below OWASP standard | Fixed |
+| SEC-003 | HIGH | rclone uploads not checksum verified | Fixed |
+| SEC-004 | MEDIUM | systemd services lack isolation | Fixed |
+
+---
+
 ## [2.0.1] - 2025-12-13
 
 ### Fixed

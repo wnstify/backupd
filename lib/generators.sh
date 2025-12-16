@@ -98,7 +98,7 @@ get_secret() {
   local secrets_dir="$1" secret_name="$2" key
   [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
   key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
+  openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
 }
 
 # Acquire lock (fixed location so it works across runs)
@@ -233,11 +233,11 @@ fi
 ARCHIVE="$TEMP_DIR/${HOSTNAME}-db_backups-${STAMP}.tar.gz.gpg"
 echo "Creating encrypted archive..."
 tar -C "$TEMP_DIR" -cf - "$STAMP" | $COMPRESSOR | \
-  gpg --batch --yes --pinentry-mode=loopback --passphrase "$PASSPHRASE" --symmetric --cipher-algo AES256 -o "$ARCHIVE"
+  gpg --batch --yes --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$PASSPHRASE") --symmetric --cipher-algo AES256 -o "$ARCHIVE"
 
 # Verify archive
 echo "Verifying archive..."
-if ! gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$ARCHIVE" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
+if ! gpg --batch --quiet --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$PASSPHRASE") -d "$ARCHIVE" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
   echo "[ERROR] Archive verification failed"
   [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Failed on $HOSTNAME" "Archive verification failed"
   exit 4
@@ -253,7 +253,7 @@ echo "Checksum: $(cat "$CHECKSUM_FILE")"
 # Upload with timeout and retry
 echo "Uploading to remote storage..."
 RCLONE_TIMEOUT=1800  # 30 minutes
-if ! timeout $RCLONE_TIMEOUT rclone copy "$ARCHIVE" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 --low-level-retries 10; then
+if ! timeout $RCLONE_TIMEOUT rclone copy "$ARCHIVE" "$RCLONE_REMOTE:$RCLONE_PATH" --checksum --retries 3 --low-level-retries 10; then
   echo "[ERROR] Upload failed"
   [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Failed on $HOSTNAME" "Upload failed"
   exit 8
@@ -373,7 +373,7 @@ get_secret() {
   local secrets_dir="$1" secret_name="$2" key
   [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
   key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
+  openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
 }
 
 # Acquire lock (wait up to 60 seconds if backup is running)
@@ -471,7 +471,7 @@ fi
 echo "$LOG_PREFIX Decrypting..."
 EXTRACT_DIR="$TEMP_DIR/extracted"
 mkdir -p "$EXTRACT_DIR"
-gpg --batch --quiet --pinentry-mode=loopback --passphrase "$RESTORE_PASSWORD" -d "$TEMP_DIR/$SELECTED" | tar -xzf - -C "$EXTRACT_DIR"
+gpg --batch --quiet --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$RESTORE_PASSWORD") -d "$TEMP_DIR/$SELECTED" | tar -xzf - -C "$EXTRACT_DIR"
 
 EXTRACTED_DIR="$(find "$EXTRACT_DIR" -maxdepth 1 -type d ! -path "$EXTRACT_DIR" | head -1)"
 [[ -z "$EXTRACTED_DIR" ]] && EXTRACTED_DIR="$EXTRACT_DIR"
@@ -627,7 +627,7 @@ generate_files_backup_script() {
 
   cat > "$SCRIPTS_DIR/files_backup.sh" << 'FILESBACKUPEOF'
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -669,7 +669,7 @@ get_secret() {
   local secrets_dir="$1" secret_name="$2" key
   [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
   key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
+  openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
 }
 
 # Acquire lock (fixed location)
@@ -865,7 +865,7 @@ for site_path in "${site_dirs[@]}"; do
   sha256sum "$archive_path" | awk '{print $1}' > "$checksum_file"
   echo "$LOG_PREFIX [$site_name] Checksum: $(cat "$checksum_file")"
 
-  if timeout 3600 rclone copy "$archive_path" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 --low-level-retries 10; then
+  if timeout 3600 rclone copy "$archive_path" "$RCLONE_REMOTE:$RCLONE_PATH" --checksum --retries 3 --low-level-retries 10; then
     # Upload checksum file
     timeout 60 rclone copy "$checksum_file" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 || echo "$LOG_PREFIX [$site_name] Checksum upload failed (backup OK)"
     # Upload restore-path metadata file
@@ -881,7 +881,7 @@ for site_path in "${site_dirs[@]}"; do
 done
 
 if [[ $site_count -eq 0 ]]; then
-  echo "$LOG_PREFIX [WARNING] No sites found in $WWW_DIR"
+  echo "$LOG_PREFIX [WARNING] No sites found matching $WEB_PATH_PATTERN"
   [[ -n "$NTFY_URL" ]] && send_notification "Files Backup Warning on $HOSTNAME" "No sites found"
   echo "==== $(date +%F' '%T) END (no sites) ===="
   exit 0
@@ -1298,7 +1298,7 @@ get_secret() {
   local secrets_dir="$1" secret_name="$2" key
   [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
   key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
+  openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
 }
 
 log() {
@@ -1392,8 +1392,8 @@ if [[ -n "$RCLONE_DB_PATH" ]]; then
 
       # Decrypt test
       if $checksum_ok; then
-        if gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
-          file_count=$(gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | wc -l)
+        if gpg --batch --quiet --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$PASSPHRASE") -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
+          file_count=$(gpg --batch --quiet --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$PASSPHRASE") -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | wc -l)
           log "Decryption: OK ($file_count files)"
           db_result="PASSED"
           db_details="$file_count files"

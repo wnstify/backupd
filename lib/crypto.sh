@@ -76,7 +76,7 @@ store_secret() {
 
   chattr -i "$secrets_dir/$secret_name" 2>/dev/null || true
 
-  echo -n "$secret_value" | openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt -pass "pass:$key" -base64 > "$secrets_dir/$secret_name"
+  echo -n "$secret_value" | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass "pass:$key" -base64 > "$secrets_dir/$secret_name"
 
   chmod 600 "$secrets_dir/$secret_name"
   chattr +i "$secrets_dir/$secret_name" 2>/dev/null || true
@@ -93,7 +93,7 @@ get_secret() {
   fi
 
   key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
+  openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
 }
 
 secret_exists() {

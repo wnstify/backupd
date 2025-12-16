@@ -9,7 +9,8 @@
 .passphrase
 .db.cnf
 .ntfy-token
-
+@docs
+.claude
 # Encrypted credential storage
 .c1
 .c2

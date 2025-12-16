@@ -95,15 +95,15 @@ verify_backup_integrity() {
           read -s -p "Enter encryption password: " passphrase
           echo
 
-          if gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
+          if gpg --batch --quiet --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$passphrase") -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
             print_success "Decryption and archive verified"
 
             # List contents
             echo
             echo "Archive contents:"
-            gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | head -20
+            gpg --batch --quiet --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$passphrase") -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | head -20
             local file_count
-            file_count=$(gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | wc -l)
+            file_count=$(gpg --batch --quiet --pinentry-mode=loopback --passphrase-fd 3 3< <(printf '%s' "$passphrase") -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | wc -l)
             echo "... ($file_count files total)"
 
             db_result="PASSED"

@@ -187,7 +187,10 @@ change_retention_policy() {
   fi
 
   if [[ -f "$SCRIPTS_DIR/files_backup.sh" ]] && [[ -n "$rclone_files_path" ]]; then
-    generate_files_backup_script "$secrets_dir" "$rclone_remote" "$rclone_files_path" "$INSTALL_DIR/logs" "$RETENTION_MINUTES"
+    local web_path_pattern webroot_subdir
+    web_path_pattern="$(get_config_value 'WEB_PATH_PATTERN')"
+    webroot_subdir="$(get_config_value 'WEBROOT_SUBDIR')"
+    generate_files_backup_script "$secrets_dir" "$rclone_remote" "$rclone_files_path" "$INSTALL_DIR/logs" "$RETENTION_MINUTES" "$web_path_pattern" "$webroot_subdir"
     print_success "Files backup script updated"
   fi
 
@@ -272,6 +275,7 @@ StandardOutput=append:$INSTALL_DIR/logs/${timer_type}_logfile.log
 StandardError=append:$INSTALL_DIR/logs/${timer_type}_logfile.log
 Nice=10
 IOSchedulingClass=idle
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -389,6 +393,7 @@ StandardOutput=journal
 StandardError=journal
 Nice=19
 IOSchedulingClass=idle
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
