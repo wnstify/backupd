@@ -356,8 +356,14 @@ download_scripts() {
     # Create symlink
     ln -sf "$target_path" "$BIN_LINK"
 
+    # Save installed branch for updater to use
+    echo "$BRANCH" > "${INSTALL_DIR}/.installed_branch"
+
     echo -e "  Script: ${GREEN}${target_path}${NC}"
     echo -e "  Command: ${GREEN}backupd${NC}"
+    if [[ "$BRANCH" != "main" ]]; then
+        echo -e "  Branch: ${YELLOW}${BRANCH}${NC}"
+    fi
 }
 
 create_systemd_units() {

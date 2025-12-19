@@ -142,6 +142,13 @@ check_for_updates_silent() {
 
 # Show update banner if available
 show_update_banner() {
+  # Skip update banner for non-main branch installations
+  local installed_branch
+  installed_branch=$(get_installed_branch 2>/dev/null || echo "main")
+  if [[ "$installed_branch" != "main" ]]; then
+    return 0
+  fi
+
   local latest_version
   latest_version=$(check_for_updates_silent) || true
 
@@ -319,6 +326,18 @@ verify_update() {
   return 0
 }
 
+# ---------- Branch Detection ----------
+
+# Get installed branch (default: main)
+get_installed_branch() {
+  local branch_file="${INSTALL_DIR}/.installed_branch"
+  if [[ -f "$branch_file" ]]; then
+    cat "$branch_file" 2>/dev/null | tr -d '[:space:]'
+  else
+    echo "main"
+  fi
+}
+
 # ---------- Main Update Function ----------
 
 # Perform the update
@@ -327,6 +346,27 @@ do_update() {
   echo "Update Backupd"
   echo "=============="
   echo
+
+  # Check if installed from non-main branch
+  local installed_branch
+  installed_branch=$(get_installed_branch)
+
+  if [[ "$installed_branch" != "main" ]]; then
+    print_warning "This installation is from the '${installed_branch}' branch."
+    echo
+    echo "Regular updates download from GitHub releases (main branch)."
+    echo "To update from '${installed_branch}' branch, use:"
+    echo
+    echo "  backupd --dev-update"
+    echo
+    read -p "Continue with release update anyway? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+      echo "Update cancelled. Use --dev-update for branch updates."
+      press_enter_to_continue
+      return 0
+    fi
+    echo
+  fi
 
   # Check current version
   print_info "Current version: ${VERSION}"
@@ -588,6 +628,9 @@ do_dev_update() {
 
   # Cleanup
   rm -rf "$temp_dir"
+
+  # Save branch for future updates
+  echo "$branch" > "${INSTALL_DIR}/.installed_branch"
 
   # Get new version from downloaded script
   local new_version
