@@ -17,6 +17,13 @@ DEBUG_MAX_SIZE=$((5 * 1024 * 1024))  # 5MB max before rotation
 # Session ID for correlating log entries
 DEBUG_SESSION_ID=""
 
+# Ensure log directory exists before any writes (safe to call during install)
+_ensure_debug_log_dir() {
+  local log_dir
+  log_dir="$(dirname "$DEBUG_LOG_FILE")"
+  [[ -d "$log_dir" ]] || mkdir -p "$log_dir" 2>/dev/null || true
+}
+
 # ---------- Core Debug Functions ----------
 
 # Initialize debug logging for this session
@@ -64,6 +71,9 @@ debug_log() {
   if [[ "$DEBUG_ENABLED" != "1" ]]; then
     return 0
   fi
+
+  # Ensure log directory exists
+  _ensure_debug_log_dir
 
   local timestamp
   timestamp=$(date '+%H:%M:%S.%3N' 2>/dev/null || date '+%H:%M:%S')
