@@ -1604,16 +1604,14 @@ VERIFYEOF
   chmod 700 "$SCRIPTS_DIR/verify_backup.sh"
 }
 
-# ---------- Generate FULL Verify Script ----------
-# This performs a complete verification with download and decryption test
-# Runs automatically every 30 days to ensure backups are actually restorable
+# ---------- Generate Full Verify REMINDER Script ----------
+# This ONLY sends a reminder notification if full verification is overdue
+# It does NOT download any files - that must be done manually via the menu
+# Runs monthly to remind admins to perform manual backup restoration tests
 
 generate_full_verify_script() {
-  local secrets_dir rclone_remote rclone_db_path rclone_files_path
+  local secrets_dir
   secrets_dir="$(get_secrets_dir)"
-  rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
-  rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
-  rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
 
   cat > "$SCRIPTS_DIR/verify_full_backup.sh" << 'FULLVERIFYEOF'
 #!/usr/bin/env bash
@@ -1621,36 +1619,24 @@ set -euo pipefail
 umask 077
 
 # ============================================================================
-# Backupd - Full Verification Script (Monthly Automated Check)
-# Downloads backup and verifies decryption + archive integrity
-# This confirms backups are actually restorable
+# Backupd - Full Verification REMINDER Script (Monthly)
+# Sends a reminder notification if it's time to do a manual full backup test
+# Does NOT download files - full tests must be run manually via: sudo backupd
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 LOGS_DIR="%%LOGS_DIR%%"
-RCLONE_REMOTE="%%RCLONE_REMOTE%%"
-RCLONE_DB_PATH="%%RCLONE_DB_PATH%%"
-RCLONE_FILES_PATH="%%RCLONE_FILES_PATH%%"
 SECRETS_DIR="%%SECRETS_DIR%%"
 HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
 LOG_FILE="$LOGS_DIR/verify_logfile.log"
 
 # Full verification tracking
 LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
+FULL_VERIFY_INTERVAL_DAYS=30
 
-SECRET_PASSPHRASE=".c1"
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
-
-# Cleanup function
-TEMP_DIR=""
-cleanup() {
-  local exit_code=$?
-  [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"
-  exit $exit_code
-}
-trap cleanup EXIT INT TERM
 
 %%CRYPTO_FUNCTIONS%%
 
@@ -1659,188 +1645,65 @@ log() {
 }
 
 send_notification() {
-  local title="$1" body="$2"
+  local title="$1" body="$2" priority="${3:-default}"
   local ntfy_url ntfy_token
   ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL")"
   ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN")"
   [[ -z "$ntfy_url" ]] && return 0
   if [[ -n "$ntfy_token" ]]; then
-    curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $title" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $title" -H "Priority: $priority" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
   else
-    curl -s -H "Title: $title" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    curl -s -H "Title: $title" -H "Priority: $priority" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
   fi
 }
 
-# Log rotation
-rotate_log() {
-  local log_file="$1"
-  local max_size=$((10 * 1024 * 1024))  # 10MB
-  [[ ! -f "$log_file" ]] && return 0
-  local log_size
-  log_size=$(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file" 2>/dev/null || echo 0)
-  if [[ "$log_size" -gt "$max_size" ]]; then
-    [[ -f "${log_file}.5" ]] && rm -f "${log_file}.5"
-    for ((i=4; i>=1; i--)); do
-      [[ -f "${log_file}.${i}" ]] && mv "${log_file}.${i}" "${log_file}.$((i+1))"
-    done
-    mv "$log_file" "${log_file}.1"
+# Check when last full verification was done
+check_full_verify_due() {
+  if [[ ! -f "$LAST_FULL_VERIFY_FILE" ]]; then
+    echo "never"
+    return 0
   fi
+
+  local last_verify_epoch current_epoch days_since
+  last_verify_epoch=$(cat "$LAST_FULL_VERIFY_FILE" 2>/dev/null)
+  current_epoch=$(date +%s)
+
+  if [[ -z "$last_verify_epoch" ]] || ! [[ "$last_verify_epoch" =~ ^[0-9]+$ ]]; then
+    echo "never"
+    return 0
+  fi
+
+  days_since=$(( (current_epoch - last_verify_epoch) / 86400 ))
+  echo "$days_since"
 }
 
 # Main
 mkdir -p "$LOGS_DIR"
-rotate_log "$LOG_FILE"
-TEMP_DIR=$(mktemp -d)
 
-log "==== FULL INTEGRITY CHECK START ===="
-log "Mode: Full (download + decrypt + verify)"
+log "==== FULL VERIFICATION REMINDER CHECK ===="
 
-PASSPHRASE="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
-if [[ -z "$PASSPHRASE" ]]; then
-  log "[ERROR] Could not retrieve encryption passphrase"
-  send_notification "Full Integrity Check FAILED on $HOSTNAME" "Could not retrieve encryption passphrase"
-  exit 1
-fi
+days_since=$(check_full_verify_due)
 
-db_result="SKIPPED"
-db_details=""
-files_result="SKIPPED"
-files_details=""
-
-# Full verify database backup (with download and decryption)
-if [[ -n "$RCLONE_DB_PATH" ]]; then
-  log "Checking database backup (full)..."
-  latest_db=$(rclone lsf "$RCLONE_REMOTE:$RCLONE_DB_PATH" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null | sort -r | head -1)
-
-  if [[ -z "$latest_db" ]]; then
-    log "[WARNING] No database backups found"
-    db_result="FAILED"
-    db_details="No backups found"
-  else
-    log "Latest: $latest_db"
-
-    # Download backup
-    log "Downloading backup..."
-    if ! rclone copy "$RCLONE_REMOTE:$RCLONE_DB_PATH/$latest_db" "$TEMP_DIR/" 2>&1 | tee -a "$LOG_FILE"; then
-      log "[ERROR] Download failed"
-      db_result="FAILED"
-      db_details="Download failed"
-    else
-      # Checksum verification
-      checksum_file="${latest_db}.sha256"
-      checksum_ok=true
-      if rclone copy "$RCLONE_REMOTE:$RCLONE_DB_PATH/$checksum_file" "$TEMP_DIR/" 2>/dev/null; then
-        stored=$(cat "$TEMP_DIR/$checksum_file")
-        calculated=$(sha256sum "$TEMP_DIR/$latest_db" | awk '{print $1}')
-        if [[ "$stored" == "$calculated" ]]; then
-          log "Checksum: OK"
-        else
-          log "[ERROR] Checksum mismatch!"
-          log "  Expected: $stored"
-          log "  Got:      $calculated"
-          db_result="FAILED"
-          db_details="Checksum mismatch"
-          checksum_ok=false
-        fi
-      else
-        log "[INFO] No checksum file (backup may predate checksum feature)"
-      fi
-
-      # Decrypt test
-      if $checksum_ok; then
-        log "Testing decryption..."
-        if gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
-          file_count=$(gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | wc -l)
-          log "Decryption: OK ($file_count files in archive)"
-          db_result="PASSED"
-          db_details="$file_count files verified"
-        else
-          log "[ERROR] Decryption or archive verification failed"
-          db_result="FAILED"
-          db_details="Decryption failed"
-        fi
-      fi
-    fi
-    rm -f "$TEMP_DIR/$latest_db" "$TEMP_DIR/$checksum_file" 2>/dev/null
-  fi
-fi
-
-# Full verify files backup (with download)
-if [[ -n "$RCLONE_FILES_PATH" ]]; then
-  log "Checking files backup (full)..."
-  latest_files=$(rclone lsf "$RCLONE_REMOTE:$RCLONE_FILES_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r | head -1)
-
-  if [[ -z "$latest_files" ]]; then
-    log "[WARNING] No files backups found"
-    files_result="FAILED"
-    files_details="No backups found"
-  else
-    log "Latest: $latest_files"
-
-    # Download backup
-    log "Downloading backup..."
-    if ! rclone copy "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$latest_files" "$TEMP_DIR/" 2>&1 | tee -a "$LOG_FILE"; then
-      log "[ERROR] Download failed"
-      files_result="FAILED"
-      files_details="Download failed"
-    else
-      # Checksum verification
-      checksum_file="${latest_files}.sha256"
-      checksum_ok=true
-      if rclone copy "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$checksum_file" "$TEMP_DIR/" 2>/dev/null; then
-        stored=$(cat "$TEMP_DIR/$checksum_file")
-        calculated=$(sha256sum "$TEMP_DIR/$latest_files" | awk '{print $1}')
-        if [[ "$stored" == "$calculated" ]]; then
-          log "Checksum: OK"
-        else
-          log "[ERROR] Checksum mismatch!"
-          files_result="FAILED"
-          files_details="Checksum mismatch"
-          checksum_ok=false
-        fi
-      else
-        log "[INFO] No checksum file"
-      fi
-
-      # Archive test
-      if $checksum_ok; then
-        log "Testing archive integrity..."
-        if tar -tzf "$TEMP_DIR/$latest_files" >/dev/null 2>&1; then
-          file_count=$(tar -tzf "$TEMP_DIR/$latest_files" 2>/dev/null | wc -l)
-          log "Archive: OK ($file_count files)"
-          files_result="PASSED"
-          files_details="$file_count files verified"
-        else
-          log "[ERROR] Archive verification failed"
-          files_result="FAILED"
-          files_details="Archive corrupted"
-        fi
-      fi
-    fi
-    rm -f "$TEMP_DIR/$latest_files" "$TEMP_DIR/$checksum_file" 2>/dev/null
-  fi
-fi
-
-# Update last full verification timestamp
-if [[ "$db_result" == "PASSED" || "$files_result" == "PASSED" ]]; then
-  date +%s > "$LAST_FULL_VERIFY_FILE"
-  chmod 600 "$LAST_FULL_VERIFY_FILE" 2>/dev/null
-  log "Full verification timestamp updated"
-fi
-
-# Summary
-log "==== SUMMARY ===="
-log "Database: $db_result ${db_details:+($db_details)}"
-log "Files: $files_result ${files_details:+($files_details)}"
-log "==== FULL INTEGRITY CHECK END ===="
-
-# Send notification
-if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-  send_notification "Full Integrity Check FAILED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details)"
-  exit 1
+if [[ "$days_since" == "never" ]]; then
+  log "[WARNING] No full backup test has EVER been performed!"
+  log "Action required: Run 'sudo backupd' -> Verify -> Full test"
+  send_notification \
+    "BACKUP TEST REQUIRED on $HOSTNAME" \
+    "You have NEVER tested if your backups are restorable! Run: sudo backupd -> Verify -> Full test (downloads and decrypts backup to verify)" \
+    "high"
+elif [[ "$days_since" -ge "$FULL_VERIFY_INTERVAL_DAYS" ]]; then
+  log "[WARNING] Last full backup test was $days_since days ago (threshold: $FULL_VERIFY_INTERVAL_DAYS days)"
+  log "Action required: Run 'sudo backupd' -> Verify -> Full test"
+  send_notification \
+    "BACKUP TEST OVERDUE on $HOSTNAME" \
+    "Last full backup test was $days_since days ago. Run: sudo backupd -> Verify -> Full test (downloads and decrypts backup to verify)" \
+    "high"
 else
-  send_notification "Full Integrity Check PASSED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details) - Backups verified restorable"
+  log "Last full backup test was $days_since days ago - OK (threshold: $FULL_VERIFY_INTERVAL_DAYS days)"
+  # No notification needed - everything is fine
 fi
+
+log "==== REMINDER CHECK END ===="
 
 exit 0
 FULLVERIFYEOF
@@ -1856,9 +1719,6 @@ FULLVERIFYEOF
   # Replace placeholders
   sed -i \
     -e "s|%%LOGS_DIR%%|$INSTALL_DIR/logs|g" \
-    -e "s|%%RCLONE_REMOTE%%|$rclone_remote|g" \
-    -e "s|%%RCLONE_DB_PATH%%|$rclone_db_path|g" \
-    -e "s|%%RCLONE_FILES_PATH%%|$rclone_files_path|g" \
     -e "s|%%SECRETS_DIR%%|$secrets_dir|g" \
     "$SCRIPTS_DIR/verify_full_backup.sh"
 
