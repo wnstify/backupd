@@ -160,6 +160,34 @@ verify_quick() {
     fi
   fi
 
+  # Send notification
+  local secrets_dir ntfy_url ntfy_token
+  secrets_dir="$(get_secrets_dir)"
+  ntfy_url="$(get_secret "$secrets_dir" ".c5" 2>/dev/null || echo "")"
+  ntfy_token="$(get_secret "$secrets_dir" ".c4" 2>/dev/null || echo "")"
+
+  if [[ -n "$ntfy_url" ]]; then
+    local notification_title notification_body
+    local hostname
+    hostname="$(hostname -f 2>/dev/null || hostname)"
+
+    if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
+      notification_title="Quick Check FAILED on $hostname"
+    elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
+      notification_title="Quick Check WARNING on $hostname"
+    else
+      notification_title="Quick Check PASSED on $hostname"
+    fi
+
+    notification_body="DB: $db_result${db_details:+ ($db_details)}, Files: $files_result${files_details:+ ($files_details)}"
+
+    if [[ -n "$ntfy_token" ]]; then
+      curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    else
+      curl -s -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    fi
+  fi
+
   # Return status
   if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
     return 1
@@ -219,57 +247,58 @@ show_full_verify_reminder() {
 # ---------- Verify Backup Integrity (Menu) ----------
 
 verify_backup_integrity() {
-  print_header
-  echo "Verify Backup Integrity"
-  echo "======================="
-  echo
+  while true; do
+    print_header
+    echo "Verify Backup Integrity"
+    echo "======================="
+    echo
 
-  # Show reminder if full test is due
-  show_full_verify_reminder
+    # Show reminder if full test is due
+    show_full_verify_reminder
 
-  echo "Verification Options:"
-  echo
-  echo -e "  ${CYAN}Quick Check${NC} (recommended for scheduled runs)"
-  echo "  Verifies backups exist with checksums. No download required."
-  echo
-  echo -e "  ${CYAN}Full Test${NC} (recommended monthly)"
-  echo "  Downloads and fully verifies backup decryption and contents."
-  echo
-  echo "1. Quick check - Database"
-  echo "2. Quick check - Files"
-  echo "3. Quick check - Both"
-  echo "4. Full test - Database (downloads backup)"
-  echo "5. Full test - Files (downloads backup)"
-  echo "6. Full test - Both (downloads backups)"
-  echo "7. Back"
-  echo
-  read -p "Select option [1-7]: " verify_choice
+    echo "Verification Options:"
+    echo
+    echo -e "  ${CYAN}Quick Check${NC} (recommended for scheduled runs)"
+    echo "  Verifies backups exist with checksums. No download required."
+    echo
+    echo -e "  ${CYAN}Full Test${NC} (recommended monthly)"
+    echo "  Downloads and fully verifies backup decryption and contents."
+    echo
+    echo "1. Quick check - Database"
+    echo "2. Quick check - Files"
+    echo "3. Quick check - Both"
+    echo "4. Full test - Database (downloads backup)"
+    echo "5. Full test - Files (downloads backup)"
+    echo "6. Full test - Both (downloads backups)"
+    echo "7. Back"
+    echo
+    read -p "Select option [1-7]: " verify_choice
 
-  case "$verify_choice" in
-    1)
-      echo
-      verify_quick "db"
-      press_enter_to_continue
-      return
-      ;;
-    2)
-      echo
-      verify_quick "files"
-      press_enter_to_continue
-      return
-      ;;
-    3)
-      echo
-      verify_quick "both"
-      press_enter_to_continue
-      return
-      ;;
-    4) verify_choice="1" ;;  # Map to original full test options
-    5) verify_choice="2" ;;
-    6) verify_choice="3" ;;
-    7|"") return ;;
-    *) return ;;
-  esac
+    case "$verify_choice" in
+      1)
+        echo
+        verify_quick "db"
+        press_enter_to_continue
+        continue
+        ;;
+      2)
+        echo
+        verify_quick "files"
+        press_enter_to_continue
+        continue
+        ;;
+      3)
+        echo
+        verify_quick "both"
+        press_enter_to_continue
+        continue
+        ;;
+      4) verify_choice="1" ;;  # Map to original full test options
+      5) verify_choice="2" ;;
+      6) verify_choice="3" ;;
+      7|"") return ;;
+      *) continue ;;
+    esac
 
   # Continue with full verification (original logic below)
 
@@ -500,4 +529,5 @@ verify_backup_integrity() {
   fi
 
   press_enter_to_continue
+  done  # End of while loop
 }
