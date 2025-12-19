@@ -1439,7 +1439,6 @@ if [[ -n "$RCLONE_DB_PATH" ]]; then
   # First pass: build set of checksum files and process backups
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    local size filename
     size=$(echo "$line" | awk '{print $1}')
     filename=$(echo "$line" | awk '{print $NF}')
 
@@ -1454,7 +1453,6 @@ if [[ -n "$RCLONE_DB_PATH" ]]; then
   # Second pass: check which backups have checksums
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    local filename
     filename=$(echo "$line" | awk '{print $NF}')
 
     if [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
@@ -1499,7 +1497,6 @@ if [[ -n "$RCLONE_FILES_PATH" ]]; then
   # First pass: build set of checksum files and process backups
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    local size filename
     size=$(echo "$line" | awk '{print $1}')
     filename=$(echo "$line" | awk '{print $NF}')
 
@@ -1514,7 +1511,6 @@ if [[ -n "$RCLONE_FILES_PATH" ]]; then
   # Second pass: check which backups have checksums
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    local filename
     filename=$(echo "$line" | awk '{print $NF}')
 
     if [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
