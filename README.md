@@ -19,8 +19,9 @@ This tool provides a complete backup solution for web hosting environments:
 3. **Secure Credential Storage** — All credentials (database, cloud storage) are encrypted with AES-256 and bound to your server's machine-id
 4. **Automated Scheduling** — Uses systemd timers for reliable, automatic backups with retry on failure
 5. **Retention & Cleanup** — Automatic deletion of old backups based on configurable retention policy
-6. **Easy Restore** — Interactive wizard to browse and restore from any backup point
-7. **Notifications** — Optional push notifications via ntfy.sh for backup status alerts
+6. **Backup Verification** — Weekly quick checks (no download), monthly reminders to test restorability
+7. **Easy Restore** — Interactive wizard to browse and restore from any backup point
+8. **Notifications** — Optional push notifications via ntfy.sh for backup status alerts
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -62,7 +63,7 @@ This tool provides exactly that.
 - ☁️ **Cloud Storage** — Supports 40+ providers via rclone (S3, B2, Wasabi, Google Drive, etc.)
 - ⏰ **Automated Scheduling** — Systemd timers with automatic retry and catch-up
 - 🧹 **Retention & Cleanup** — Configurable retention policy with automatic old backup deletion
-- ✅ **Integrity Verification** — SHA256 checksums, test restore, and optional scheduled checks
+- ✅ **Integrity Verification** — SHA256 checksums, quick checks (no download), and monthly full test reminders
 - 🔔 **Notifications** — Optional alerts via ntfy.sh on backup completion/failure
 - 🔄 **Easy Restore** — Interactive restore wizard with safety backups and checksum verification
 - 📋 **Detailed Logging** — Full logs with timestamps and automatic log rotation
@@ -130,7 +131,8 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 │   ├── db_restore.sh         # Database restore script
 │   ├── files_backup.sh       # Files backup script
 │   ├── files_restore.sh      # Files restore script
-│   └── verify_backup.sh      # Integrity verification script
+│   ├── verify_backup.sh      # Quick integrity check (weekly)
+│   └── verify_reminder.sh    # Full test reminder (monthly)
 └── logs/
     ├── db_logfile.log        # Database backup logs (auto-rotated)
     ├── files_logfile.log     # Files backup logs (auto-rotated)
@@ -152,8 +154,10 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 ├── backupd-db.timer
 ├── backupd-files.service
 ├── backupd-files.timer
-├── backupd-verify.service
-└── backupd-verify.timer
+├── backupd-verify.service        # Weekly quick check
+├── backupd-verify.timer
+├── backupd-verify-full.service   # Monthly reminder (no download)
+└── backupd-verify-full.timer
 ```
 
 ---
@@ -455,6 +459,8 @@ Optional push notifications via [ntfy.sh](https://ntfy.sh):
 2. Subscribe to a topic (e.g., `myserver-backups`)
 3. Configure in backupd settings
 4. Receive alerts on backup success/failure
+
+**Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without ntfy configured - you just won't receive push notifications.
 
 ---
 

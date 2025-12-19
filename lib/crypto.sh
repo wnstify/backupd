@@ -372,7 +372,7 @@ migrate_secrets() {
       echo "    ✓ Encrypted $secret_name"
     else
       echo "    ✗ Failed to encrypt $secret_name"
-      ((failed++))
+      ((failed++)) || true
     fi
   done
 

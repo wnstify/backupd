@@ -501,7 +501,7 @@ count_sites_for_pattern() {
   local count=0
 
   for dir in $pattern; do
-    [[ -d "$dir" ]] && ((count++))
+    [[ -d "$dir" ]] && { ((count++)) || true; }
   done
 
   echo "$count"

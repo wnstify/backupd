@@ -13,19 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Automatic Backup Verification** - Enabled by default during setup
   - Weekly quick check (Sundays 2 AM): Verifies backups exist, no download
-  - Monthly full check (1st of month 3 AM): Downloads and tests decryption
+  - Monthly reminder (1st of month 3 AM): Sends notification to manually test
   - Ensures backups are actually restorable, not just present
 
 - **Quick Verification Mode** - Bandwidth-efficient backup checks
+  - Single API call per backup type (optimized from ~200 calls to 2)
+  - Uses `rclone lsl` with associative arrays for efficient checksum matching
   - Verifies backup existence and checksum files without downloading
   - Ideal for large backups (100+ sites, multi-GB files)
   - Runs weekly by default, configurable via schedule menu
+  - Sends notification with results (if ntfy configured)
 
-- **Monthly Full Verification** - Complete backup validation
-  - Downloads backup and verifies decryption works
-  - Tests archive integrity (file count, structure)
-  - Sends notification with results
-  - Warning shown when attempting to disable (backup hygiene reminder)
+- **Monthly Full Test Reminder** - Reminder-only approach for large sites
+  - Does NOT automatically download backups (bandwidth-friendly)
+  - Sends notification prompting manual verification
+  - Tracks days since last full test (30-day threshold)
+  - High-priority notification if backups have NEVER been tested
+  - Respects that large sites can have hundreds of GB of backups
 
 - **Argon2id Encryption** - Modern memory-hard key derivation (default when `argon2` package installed)
   - GPU/ASIC resistant, recommended by OWASP
@@ -82,6 +86,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--branch develop` flag for testing pre-release versions
   - Shows branch name during installation if not main
 
+### Fixed
+
+- **Graceful ntfy handling** - All operations work when notifications not configured
+  - `get_secret` calls for ntfy now have proper error protection
+  - Scripts continue normally without notifications instead of crashing
+  - Fixed in: `lib/verify.sh`, `lib/generators.sh` (3 locations)
+
+- **Arithmetic operations with `set -e`** - Fixed silent script exits
+  - `((var++))` returns exit code 1 when var is 0, causing script to exit
+  - Added `|| true` to all counter increment operations
+  - Fixed in: `lib/crypto.sh`, `lib/core.sh`, `lib/verify.sh`, `lib/generators.sh`
+
+- **`local` keyword in generated scripts** - Fixed syntax error
+  - `local` only valid inside functions, not at script top-level
+  - Removed `local` from while loops in generated verification scripts
+
+- **Quick check menu flow** - Now stays in verify submenu after check
+  - Previously returned to main menu, requiring re-navigation
+  - Wrapped verify menu in loop for better UX
+
 ### Technical
 
 - All generated scripts now embed version-aware crypto functions
@@ -89,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Existing installations continue working with their current encryption version
 - New `lib/debug.sh` module for debug logging infrastructure
 - Improved uninstall: now stops services before removing files, correct order of operations
+- Quick verification uses single `rclone lsl` call with associative arrays
+- Monthly verification changed from full download to reminder-only notification
+- All shell scripts pass `bash -n` syntax validation
 
 ---
 
@@ -577,7 +604,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 2.1.0 | 2025-12-19 | Argon2id encryption, enhanced PBKDF2, migration support |
+| 2.1.0 | 2025-12-19 | Argon2id encryption, optimized quick verification, monthly reminder system, graceful ntfy handling |
 | 2.0.1 | 2025-12-13 | Branding fixes, lock file names |
 | 2.0.0 | 2025-12-13 | Major rebranding to Backupd |
 | 1.6.2 | 2024-12-12 | Fixed ntfy notifications and SIGPIPE in files verification |

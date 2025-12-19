@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v2.0.1** by Backupd.
+Complete usage documentation for **Backupd v2.1.0** by Backupd.
 
 ## Table of Contents
 
@@ -76,7 +76,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v2.0.1
+              Backupd v2.1.0
                     by Backupd
 ========================================================
 
@@ -108,7 +108,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-              Backupd v2.0.1
+              Backupd v2.1.0
                     by Backupd
 ========================================================
 
@@ -571,76 +571,75 @@ Continue anyway? (y/N):
 | All passed | "✓ Backup Verification PASSED on hostname - DB: PASSED, Files: PASSED" |
 | Any failed | "⚠️ Backup Verification FAILED on hostname - DB: FAILED, Files: PASSED" |
 
-### Scheduled Integrity Check (Optional)
+### Scheduled Verification (Automatic)
 
-Automate verification with a weekly integrity check:
+Backupd includes two levels of automatic verification:
+
+#### Weekly Quick Check (Default)
+
+Runs every Sunday at 2 AM. **No download required** - uses minimal API calls:
+
+- Verifies backup files exist in cloud storage
+- Checks that checksum files (`.sha256`) are present
+- Reports total backup count and checksum coverage
+- Sends notification with results
 
 ```
 Manage schedules → Set/change integrity check schedule
 ```
 
+**Quick check is ideal for:**
+- Large sites (100+ backups, multi-GB files)
+- Limited bandwidth environments
+- Frequent verification without download costs
+
+#### Monthly Full Test Reminder
+
+Runs on the 1st of each month at 3 AM. **Does NOT download automatically** - sends a reminder notification prompting you to manually test your backups.
+
+Why reminder-only?
+- Large sites can have hundreds of GB of backups
+- Automatic downloads could overwhelm bandwidth/storage
+- Manual testing ensures you verify the complete restore process
+
+**Reminder notification:**
 ```
-Schedule Integrity Check
-========================
-
-This will schedule automatic backup verification.
-It downloads the latest backup and verifies:
-  • SHA256 checksum
-  • Decryption (using stored passphrase)
-  • Archive contents
-
-Results are logged and sent via notification (if configured).
-
-Select schedule for integrity check:
-1. Weekly (Sunday at 2 AM) - recommended
-2. Weekly (Saturday at 3 AM)
-3. Every 2 weeks (1st and 15th at 2 AM)
-4. Monthly (1st day at 2 AM)
-5. Daily at 4 AM (for critical systems)
-6. Custom schedule
-7. Cancel
+BACKUP TEST REMINDER on hostname
+Last full backup test was 32 days ago.
+Please run a manual test restore to verify your backups are working.
 ```
 
-**How it differs from manual verification:**
+If you've **never** tested your backups:
+```
+BACKUP TEST REQUIRED on hostname
+You have NEVER tested if your backups are restorable!
+Please run: sudo backupd → Verify backup integrity → Full verification
+```
 
-| | Manual (Menu) | Scheduled |
-|--|---------------|-----------|
-| **Password** | Asks you | Uses stored passphrase |
-| **Interaction** | Interactive | Fully automatic |
-| **When** | On-demand | Weekly/custom schedule |
-| **Output** | Screen | Log file + notification |
+#### Manual Full Verification
+
+For complete verification (downloads and tests decryption):
+
+```
+sudo backupd → Run backup now → Verify backup integrity → Full verification
+```
+
+This downloads the backup, verifies checksum, tests decryption, and lists contents.
+
+**Verification comparison:**
+
+| Type | Downloads | Bandwidth | Schedule | Use Case |
+|------|-----------|-----------|----------|----------|
+| **Quick Check** | No | Minimal | Weekly (auto) | Regular monitoring |
+| **Reminder** | No | None | Monthly (auto) | Prompt for manual test |
+| **Full Manual** | Yes | High | On-demand | Complete verification |
 
 **Log file location:**
 ```
 /etc/backupd/logs/verify_logfile.log
 ```
 
-**Sample log output:**
-```
-[2025-01-19 02:00:01] ==== INTEGRITY CHECK START ====
-[2025-01-19 02:00:01] Checking database backup...
-[2025-01-19 02:00:01] Latest: myserver-db_backups-2025-01-15-0300.tar.gz.gpg
-[2025-01-19 02:00:15] Checksum: OK
-[2025-01-19 02:00:18] Decryption: OK (15 files)
-[2025-01-19 02:00:18] Checking files backup...
-[2025-01-19 02:00:18] Latest: https__site1.com-2025-01-15-0300.tar.gz
-[2025-01-19 02:00:45] Checksum: OK
-[2025-01-19 02:00:48] Archive: OK (1247 files)
-[2025-01-19 02:00:48] ==== SUMMARY ====
-[2025-01-19 02:00:48] Database: PASSED - 15 files
-[2025-01-19 02:00:48] Files: PASSED - 1247 files
-[2025-01-19 02:00:48] ==== INTEGRITY CHECK END ====
-```
-
-**Scheduled notifications:**
-
-| Result | Notification |
-|--------|--------------|
-| Passed | "✓ Integrity Check PASSED on hostname - DB: PASSED (15 files), Files: PASSED (1247 files)" |
-| Warning | "⚠️ Integrity Check WARNING on hostname - DB: WARNING, Files: PASSED" |
-| Failed | "⚠️ Integrity Check FAILED on hostname - DB: FAILED, Files: PASSED" |
-
-**Disable scheduled check:**
+**Disable scheduled checks:**
 ```
 Manage schedules → Disable integrity check schedule
 ```
@@ -975,7 +974,8 @@ Restore Scripts:
 Scheduled Backups (systemd timers):
 ✓ Database: *-*-* *:00:00 (hourly)
 ✓ Files: *-*-* 03:00:00 (daily at 3 AM)
-✓ Integrity check: Sun *-*-* 02:00:00 (weekly)
+✓ Quick check: Sun *-*-* 02:00:00 (weekly, no download)
+✓ Full test reminder: *-*-01 03:00:00 (monthly)
 
 Retention Policy:
 ✓ Retention: 30 days
@@ -1000,12 +1000,13 @@ Retention Policy:
 ⚠ Retention: No automatic cleanup
 ```
 
-**Note:** Integrity check is optional and shows differently if not configured:
+**Note:** Verification schedules are enabled by default. If disabled:
 ```
 Scheduled Backups (systemd timers):
 ✓ Database: *-*-* *:00:00 (hourly)
 ✓ Files: *-*-* 03:00:00 (daily at 3 AM)
-  Integrity check: NOT SCHEDULED (optional)
+  Quick check: NOT SCHEDULED
+  Full test reminder: NOT SCHEDULED
 ```
 
 ### Viewing Logs
@@ -1031,7 +1032,9 @@ Logs are displayed using `less` for easy navigation:
 
 ## Notifications
 
-The tool supports push notifications via [ntfy.sh](https://ntfy.sh) for backup events.
+The tool supports **optional** push notifications via [ntfy.sh](https://ntfy.sh) for backup events.
+
+**Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without ntfy configured - you just won't receive push alerts.
 
 ### Notification Types
 
@@ -1043,10 +1046,12 @@ The tool supports push notifications via [ntfy.sh](https://ntfy.sh) for backup e
 | **Files Backup Errors** | Files Backup Errors on hostname | Success: 2, Failed: site.com |
 | **DB Retention Success** | DB Retention Cleanup on hostname | Removed 3 old backup(s) |
 | **DB Retention Warning** | DB Retention Cleanup Warning on hostname | Removed: 2, Errors: 1 |
-| **DB Retention Failed** | DB Retention Cleanup Failed on hostname | Could not calculate cutoff time |
 | **Files Retention Success** | Files Retention Cleanup on hostname | Removed 2 old backup(s) |
 | **Files Retention Warning** | Files Retention Cleanup Warning on hostname | Removed: 1, Errors: 1 |
-| **Files Retention Failed** | Files Retention Cleanup Failed on hostname | Could not calculate cutoff time |
+| **Quick Check Passed** | Backup Quick Check PASSED on hostname | DB: 5 backups (5 with checksums), Files: 12 backups |
+| **Quick Check Warning** | Backup Quick Check WARNING on hostname | Some backups missing checksums |
+| **Test Reminder** | BACKUP TEST REMINDER on hostname | Last full test was 32 days ago |
+| **Test Required** | BACKUP TEST REQUIRED on hostname | You have NEVER tested your backups! |
 
 ### Setting Up ntfy
 
@@ -1221,7 +1226,8 @@ systemctl list-timers | grep backupd
 # Check timer status
 systemctl status backupd-db.timer
 systemctl status backupd-files.timer
-systemctl status backupd-verify.timer
+systemctl status backupd-verify.timer        # Weekly quick check
+systemctl status backupd-verify-full.timer   # Monthly reminder
 
 # Manually trigger a backup (via systemd)
 systemctl start backupd-db.service
@@ -1230,6 +1236,7 @@ systemctl start backupd-files.service
 # View timer logs
 journalctl -u backupd-db.service -f
 journalctl -u backupd-files.service -f
+journalctl -u backupd-verify.service -f
 
 # Disable a timer
 systemctl disable backupd-db.timer

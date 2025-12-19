@@ -500,8 +500,8 @@ verify_backup_integrity() {
 
   # Send notification
   local ntfy_url ntfy_token
-  ntfy_url="$(get_secret "$secrets_dir" ".c5")"
-  ntfy_token="$(get_secret "$secrets_dir" ".c4")"
+  ntfy_url="$(get_secret "$secrets_dir" ".c5" 2>/dev/null || echo "")"
+  ntfy_token="$(get_secret "$secrets_dir" ".c4" 2>/dev/null || echo "")"
 
   if [[ -n "$ntfy_url" ]]; then
     local notification_title notification_body

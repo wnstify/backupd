@@ -1359,8 +1359,8 @@ log() {
 send_notification() {
   local title="$1" body="$2"
   local ntfy_url ntfy_token
-  ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL")"
-  ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN")"
+  ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
+  ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
   [[ -z "$ntfy_url" ]] && return 0
   if [[ -n "$ntfy_token" ]]; then
     curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $title" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
@@ -1647,8 +1647,8 @@ log() {
 send_notification() {
   local title="$1" body="$2" priority="${3:-default}"
   local ntfy_url ntfy_token
-  ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL")"
-  ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN")"
+  ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
+  ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
   [[ -z "$ntfy_url" ]] && return 0
   if [[ -n "$ntfy_token" ]]; then
     curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $title" -H "Priority: $priority" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true

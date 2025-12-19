@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 |---------|--------------------|
+| 2.1.x   | :white_check_mark: |
 | 2.0.x   | :white_check_mark: |
 | 1.6.x   | :x:                |
 | 1.5.x   | :x:                |
@@ -233,9 +234,15 @@ The following secrets are encrypted and stored securely:
    - Longer retention = more recovery options
 
 4. **Regular Verification**
-   - Enable scheduled integrity checks (weekly recommended)
-   - Periodically test restore process
-   - Monitor backup notifications
+   - Weekly quick checks run automatically (no download, low bandwidth)
+   - Monthly reminders prompt you to test actual restorability
+   - Periodically test restore process manually
+   - Monitor backup notifications (if configured)
+
+5. **Optional Notifications**
+   - ntfy notifications are optional - all operations work without them
+   - If not configured, backups/restores/verifications run normally
+   - Consider enabling for critical production systems
 
 ### Credential Rotation
 
@@ -380,7 +387,7 @@ This tool is designed with security in mind but is provided "as is". Users are r
 
 | Version | Security Changes |
 |---------|-----------------|
-| 2.1.0 | Argon2id encryption, required checksums, HTTPS-only, verified rclone install, strong password requirements (12+ chars, 2+ special) |
+| 2.1.0 | Argon2id encryption, required checksums, HTTPS-only, verified rclone install, strong password requirements (12+ chars, 2+ special), graceful ntfy handling, optimized quick verification |
 | 1.5.0 | Secure update system with SHA256 checksum verification of releases |
 | 1.4.2 | Configurable database username (reduced privilege support) |
 | 1.4.1 | Database restore verification prompt (prevents accidental data loss) |
