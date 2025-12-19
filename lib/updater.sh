@@ -66,7 +66,7 @@ get_latest_version() {
 
   # Try to get latest release from GitHub API
   if command -v curl &>/dev/null; then
-    latest=$(curl -s --connect-timeout 5 "$GITHUB_API_URL" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    latest=$(curl -s --proto '=https' --connect-timeout 5 "$GITHUB_API_URL" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
   fi
 
   # Remove 'v' prefix if present
@@ -146,10 +146,8 @@ show_update_banner() {
   latest_version=$(check_for_updates_silent) || true
 
   if [[ -n "$latest_version" ]]; then
-    echo -e "${YELLOW}┌────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${YELLOW}│  Update available: ${VERSION} → ${latest_version}                        │${NC}"
-    echo -e "${YELLOW}│  Select 'U' from menu or run: backupd --update           │${NC}"
-    echo -e "${YELLOW}└────────────────────────────────────────────────────────┘${NC}"
+    echo -e "${YELLOW}Update available: ${VERSION} → ${latest_version}${NC}"
+    echo -e "${YELLOW}Run 'backupd --update' or select 'U' from menu${NC}"
     echo
   fi
   return 0
@@ -276,8 +274,11 @@ apply_update() {
   fi
 
   # Find the extracted directory (might be nested)
+  # Use portable find syntax (works on both GNU and BSD)
   local source_dir
-  source_dir=$(find "$extract_dir" -maxdepth 2 -name "backupd.sh" -printf '%h\n' 2>/dev/null | head -1)
+  local found_script
+  found_script=$(find "$extract_dir" -maxdepth 2 -name "backupd.sh" 2>/dev/null | head -1)
+  source_dir=$(dirname "$found_script" 2>/dev/null)
 
   if [[ -z "$source_dir" || ! -f "${source_dir}/backupd.sh" ]]; then
     print_error "Invalid update archive structure"
