@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Quick Verification Mode** - Bandwidth-efficient backup checks for scheduled runs
+  - Verifies backup existence and checksum files without downloading
+  - Ideal for large backups (100+ sites, multi-GB files)
+  - Full test available via interactive menu for monthly validation
+
+- **30-Day Full Test Reminder** - Proactive backup validation prompts
+  - Tracks last full verification timestamp
+  - Scheduled checks include reminder if full test overdue
+  - Notification includes reminder when full test needed
+
 - **Argon2id Encryption** - Modern memory-hard key derivation (default when `argon2` package installed)
   - GPU/ASIC resistant, recommended by OWASP 2023
   - Parameters: 64MB memory, 3 iterations, 4 parallel threads

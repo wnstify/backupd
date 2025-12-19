@@ -1311,6 +1311,9 @@ FILESRESTOREEOF
 }
 
 # ---------- Generate Verify Script ----------
+# This generates a QUICK verification script for scheduled runs
+# It does NOT download backups - only checks file/checksum existence
+# For full verification, use the interactive menu
 
 generate_verify_script() {
   local secrets_dir rclone_remote rclone_db_path rclone_files_path
@@ -1324,6 +1327,12 @@ generate_verify_script() {
 set -euo pipefail
 umask 077
 
+# ============================================================================
+# Backupd - Quick Verification Script (Scheduled Mode)
+# Checks backup existence and checksums WITHOUT downloading
+# For full verification (with decryption test), use: sudo backupd -> Verify
+# ============================================================================
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 LOGS_DIR="%%LOGS_DIR%%"
@@ -1334,18 +1343,12 @@ SECRETS_DIR="%%SECRETS_DIR%%"
 HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
 LOG_FILE="$LOGS_DIR/verify_logfile.log"
 
-SECRET_PASSPHRASE=".c1"
+# Full verification tracking
+LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
+FULL_VERIFY_INTERVAL_DAYS=30
+
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
-
-# Cleanup function
-TEMP_DIR=""
-cleanup() {
-  local exit_code=$?
-  [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"
-  exit $exit_code
-}
-trap cleanup EXIT INT TERM
 
 %%CRYPTO_FUNCTIONS%%
 
@@ -1372,7 +1375,7 @@ rotate_log() {
   local max_size=$((10 * 1024 * 1024))  # 10MB
   [[ ! -f "$log_file" ]] && return 0
   local log_size
-  log_size=$(stat -c%s "$log_file" 2>/dev/null || echo 0)
+  log_size=$(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file" 2>/dev/null || echo 0)
   if [[ "$log_size" -gt "$max_size" ]]; then
     [[ -f "${log_file}.5" ]] && rm -f "${log_file}.5"
     for ((i=4; i>=1; i--)); do
@@ -1382,148 +1385,152 @@ rotate_log() {
   fi
 }
 
+# Format file size for display
+format_size() {
+  local size="$1"
+  numfmt --to=iec-i --suffix=B "$size" 2>/dev/null || echo "${size}B"
+}
+
+# Check if full verification is due
+check_full_verify_due() {
+  if [[ ! -f "$LAST_FULL_VERIFY_FILE" ]]; then
+    echo "never"
+    return 0
+  fi
+
+  local last_verify_epoch current_epoch days_since
+  last_verify_epoch=$(cat "$LAST_FULL_VERIFY_FILE" 2>/dev/null)
+  current_epoch=$(date +%s)
+
+  if [[ -z "$last_verify_epoch" ]] || ! [[ "$last_verify_epoch" =~ ^[0-9]+$ ]]; then
+    echo "never"
+    return 0
+  fi
+
+  days_since=$(( (current_epoch - last_verify_epoch) / 86400 ))
+  echo "$days_since"
+}
+
 # Main
+mkdir -p "$LOGS_DIR"
 rotate_log "$LOG_FILE"
-TEMP_DIR=$(mktemp -d)
 
-log "==== INTEGRITY CHECK START ===="
-
-PASSPHRASE="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
-if [[ -z "$PASSPHRASE" ]]; then
-  log "[ERROR] Could not retrieve encryption passphrase"
-  send_notification "Integrity Check FAILED on $HOSTNAME" "Could not retrieve encryption passphrase"
-  exit 1
-fi
+log "==== QUICK INTEGRITY CHECK START ===="
+log "Mode: Quick (checksum-only, no download)"
 
 db_result="SKIPPED"
 db_details=""
 files_result="SKIPPED"
 files_details=""
 
-# Verify database backup
+# Quick verify database backup (no download)
 if [[ -n "$RCLONE_DB_PATH" ]]; then
   log "Checking database backup..."
   latest_db=$(rclone lsf "$RCLONE_REMOTE:$RCLONE_DB_PATH" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null | sort -r | head -1)
 
   if [[ -z "$latest_db" ]]; then
     log "[WARNING] No database backups found"
-    db_result="WARNING"
+    db_result="FAILED"
     db_details="No backups found"
   else
     log "Latest: $latest_db"
 
-    # Download
-    if ! rclone copy "$RCLONE_REMOTE:$RCLONE_DB_PATH/$latest_db" "$TEMP_DIR/" 2>&1 | tee -a "$LOG_FILE"; then
-      log "[ERROR] Download failed"
-      db_result="FAILED"
-      db_details="Download failed"
-    else
-      # Checksum verification
-      checksum_file="${latest_db}.sha256"
-      checksum_ok=true
-      if rclone copy "$RCLONE_REMOTE:$RCLONE_DB_PATH/$checksum_file" "$TEMP_DIR/" 2>/dev/null; then
-        stored=$(cat "$TEMP_DIR/$checksum_file")
-        calculated=$(sha256sum "$TEMP_DIR/$latest_db" | awk '{print $1}')
-        if [[ "$stored" == "$calculated" ]]; then
-          log "Checksum: OK"
-        else
-          log "[ERROR] Checksum mismatch!"
-          log "  Expected: $stored"
-          log "  Got:      $calculated"
-          db_result="FAILED"
-          db_details="Checksum mismatch"
-          checksum_ok=false
-        fi
-      else
-        log "[INFO] No checksum file (backup may predate checksum feature)"
-      fi
+    # Check file exists and get size (no download)
+    file_info=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_DB_PATH/$latest_db" 2>/dev/null)
+    if [[ -n "$file_info" ]]; then
+      file_size=$(echo "$file_info" | awk '{print $1}')
 
-      # Decrypt test
-      if $checksum_ok; then
-        if gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
-          file_count=$(gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$TEMP_DIR/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | wc -l)
-          log "Decryption: OK ($file_count files)"
-          db_result="PASSED"
-          db_details="$file_count files"
-        else
-          log "[ERROR] Decryption or archive verification failed"
-          db_result="FAILED"
-          db_details="Decryption failed"
-        fi
+      # Check if checksum file exists
+      checksum_file="${latest_db}.sha256"
+      if rclone lsf "$RCLONE_REMOTE:$RCLONE_DB_PATH/$checksum_file" &>/dev/null; then
+        log "Backup exists: $(format_size "$file_size"), checksum file present"
+        db_result="PASSED"
+        db_details="$(format_size "$file_size")"
+      else
+        log "[WARNING] Backup exists but no checksum file"
+        db_result="WARNING"
+        db_details="no checksum"
       fi
+    else
+      log "[ERROR] Backup file not accessible"
+      db_result="FAILED"
+      db_details="File not accessible"
     fi
-    rm -f "$TEMP_DIR/$latest_db" "$TEMP_DIR/$checksum_file" 2>/dev/null
   fi
 fi
 
-# Verify files backup
+# Quick verify files backup (no download)
 if [[ -n "$RCLONE_FILES_PATH" ]]; then
   log "Checking files backup..."
   latest_files=$(rclone lsf "$RCLONE_REMOTE:$RCLONE_FILES_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r | head -1)
 
   if [[ -z "$latest_files" ]]; then
     log "[WARNING] No files backups found"
-    files_result="WARNING"
+    files_result="FAILED"
     files_details="No backups found"
   else
     log "Latest: $latest_files"
 
-    # Download
-    if ! rclone copy "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$latest_files" "$TEMP_DIR/" 2>&1 | tee -a "$LOG_FILE"; then
-      log "[ERROR] Download failed"
-      files_result="FAILED"
-      files_details="Download failed"
-    else
-      # Checksum verification
-      checksum_file="${latest_files}.sha256"
-      checksum_ok=true
-      if rclone copy "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$checksum_file" "$TEMP_DIR/" 2>/dev/null; then
-        stored=$(cat "$TEMP_DIR/$checksum_file")
-        calculated=$(sha256sum "$TEMP_DIR/$latest_files" | awk '{print $1}')
-        if [[ "$stored" == "$calculated" ]]; then
-          log "Checksum: OK"
-        else
-          log "[ERROR] Checksum mismatch!"
-          files_result="FAILED"
-          files_details="Checksum mismatch"
-          checksum_ok=false
-        fi
-      else
-        log "[INFO] No checksum file"
-      fi
+    # Check file exists and get size (no download)
+    file_info=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$latest_files" 2>/dev/null)
+    if [[ -n "$file_info" ]]; then
+      file_size=$(echo "$file_info" | awk '{print $1}')
 
-      # Archive test
-      if $checksum_ok; then
-        if tar -tzf "$TEMP_DIR/$latest_files" >/dev/null 2>&1; then
-          file_count=$(tar -tzf "$TEMP_DIR/$latest_files" 2>/dev/null | wc -l)
-          log "Archive: OK ($file_count files)"
-          files_result="PASSED"
-          files_details="$file_count files"
-        else
-          log "[ERROR] Archive verification failed"
-          files_result="FAILED"
-          files_details="Archive corrupted"
-        fi
+      # Check if checksum file exists
+      checksum_file="${latest_files}.sha256"
+      if rclone lsf "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$checksum_file" &>/dev/null; then
+        log "Backup exists: $(format_size "$file_size"), checksum file present"
+        files_result="PASSED"
+        files_details="$(format_size "$file_size")"
+      else
+        log "[WARNING] Backup exists but no checksum file"
+        files_result="WARNING"
+        files_details="no checksum"
       fi
+    else
+      log "[ERROR] Backup file not accessible"
+      files_result="FAILED"
+      files_details="File not accessible"
     fi
-    rm -f "$TEMP_DIR/$latest_files" "$TEMP_DIR/$checksum_file" 2>/dev/null
   fi
+fi
+
+# Check if full verification is overdue
+days_since_full=$(check_full_verify_due)
+full_verify_reminder=""
+if [[ "$days_since_full" == "never" ]]; then
+  full_verify_reminder="REMINDER: No full backup test ever performed! Run: sudo backupd -> Verify -> Full test"
+  log "[REMINDER] $full_verify_reminder"
+elif [[ "$days_since_full" -ge "$FULL_VERIFY_INTERVAL_DAYS" ]]; then
+  full_verify_reminder="REMINDER: Last full backup test was $days_since_full days ago. Recommended: Run full test monthly."
+  log "[REMINDER] $full_verify_reminder"
 fi
 
 # Summary
 log "==== SUMMARY ===="
-log "Database: $db_result ${db_details:+- $db_details}"
-log "Files: $files_result ${files_details:+- $files_details}"
-log "==== INTEGRITY CHECK END ===="
+log "Database: $db_result ${db_details:+($db_details)}"
+log "Files: $files_result ${files_details:+($files_details)}"
+log "==== QUICK INTEGRITY CHECK END ===="
 
 # Send notification
+notification_body="DB: $db_result, Files: $files_result (Quick check)"
+if [[ -n "$full_verify_reminder" ]]; then
+  notification_body="$notification_body. $full_verify_reminder"
+fi
+
 if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-  send_notification "Integrity Check FAILED on $HOSTNAME" "DB: $db_result, Files: $files_result"
+  send_notification "Quick Check FAILED on $HOSTNAME" "$notification_body"
   exit 1
 elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
-  send_notification "Integrity Check WARNING on $HOSTNAME" "DB: $db_result, Files: $files_result"
+  send_notification "Quick Check WARNING on $HOSTNAME" "$notification_body"
+  exit 0
 else
-  send_notification "Integrity Check PASSED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details)"
+  # Only notify on success if full verify reminder is needed
+  if [[ -n "$full_verify_reminder" ]]; then
+    send_notification "Quick Check OK - Full Test Needed on $HOSTNAME" "$notification_body"
+  else
+    send_notification "Quick Check PASSED on $HOSTNAME" "$notification_body"
+  fi
 fi
 
 exit 0
