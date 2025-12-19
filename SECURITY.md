@@ -40,6 +40,21 @@ If you discover a security vulnerability in Backupd, please report it responsibl
 
 ### How Credentials Are Protected
 
+**Modern (v3 - Argon2id, default for new installations):**
+```
+┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
+│   machine-id    │────▶│   + salt     │────▶│    Argon2id     │
+│  (unique/server)│     │  (random)    │     │  (derived key)  │
+└─────────────────┘     └──────────────┘     └────────┬────────┘
+                                                      │
+                                                      ▼
+┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
+│  Your secrets   │────▶│   AES-256    │────▶│  .enc files     │
+│  (credentials)  │     │  + PBKDF2    │     │  (encrypted)    │
+└─────────────────┘     └──────────────┘     └─────────────────┘
+```
+
+**Fallback (v2 - PBKDF2, when argon2 not installed):**
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
 │   machine-id    │────▶│   + salt     │────▶│  SHA256 hash    │
@@ -49,18 +64,56 @@ If you discover a security vulnerability in Backupd, please report it responsibl
                                                       ▼
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
 │  Your secrets   │────▶│   AES-256    │────▶│  .enc files     │
-│  (credentials)  │     │  encryption  │     │  (encrypted)    │
+│  (credentials)  │     │  + PBKDF2    │     │  (encrypted)    │
 └─────────────────┘     └──────────────┘     └─────────────────┘
 ```
 
+### Encryption Versions
+
+| Version | Key Derivation | PBKDF2 Iterations | Status |
+|---------|----------------|-------------------|--------|
+| v3 | Argon2id (64MB, 3 iter) | 100,000 | **Default** (modern) |
+| v2 | SHA256 | 800,000 | Fallback (if argon2 not installed) |
+| v1 | SHA256 | 100,000 | Legacy (existing installs) |
+
 ### Encryption Details
 
-| Component | Implementation |
-|-----------|----------------|
-| **Encryption Algorithm** | AES-256-CBC |
-| **Key Derivation** | SHA256(machine-id + salt) |
-| **Salt** | Random 32-byte value, unique per installation |
-| **Machine Binding** | `/etc/machine-id` (Linux standard) |
+| Component | v3 (Argon2id) | v2/v1 (PBKDF2) |
+|-----------|---------------|----------------|
+| **Encryption Algorithm** | AES-256-CBC | AES-256-CBC |
+| **Key Derivation** | Argon2id(machine-id + salt) | SHA256(machine-id + salt) |
+| **Argon2id Memory** | 64MB (2^16) | N/A |
+| **Argon2id Iterations** | 3 | N/A |
+| **Argon2id Parallelism** | 4 threads | N/A |
+| **PBKDF2 Iterations** | 100,000 | 800,000 (v2) / 100,000 (v1) |
+| **Salt** | Random 64-byte value, unique per installation | Same |
+| **Machine Binding** | `/etc/machine-id` (Linux standard) | Same |
+
+### Why Argon2id?
+
+Argon2id is recommended by OWASP (2023) for password hashing and key derivation:
+
+- **Memory-hard**: Requires 64MB RAM, making GPU attacks expensive
+- **Time-hard**: Multiple iterations prevent brute-force attacks
+- **Parallelism**: Utilizes multiple CPU cores efficiently
+- **Side-channel resistant**: The "id" variant is resistant to timing attacks
+
+### Encryption Migration
+
+Existing installations can upgrade to modern encryption:
+
+```bash
+# Check current encryption status
+sudo backupd --encryption-status
+
+# Upgrade to best available encryption
+sudo backupd --migrate-encryption
+```
+
+Migration safely:
+1. Decrypts all secrets with current algorithm
+2. Re-encrypts with best available algorithm
+3. Regenerates backup scripts with new encryption
 
 ### Protected Credentials
 
@@ -68,6 +121,8 @@ The following secrets are encrypted and stored securely:
 
 | Secret | Purpose |
 |--------|---------|
+| `.s` | Salt for key derivation (not encrypted, but protected) |
+| `.algo` | Encryption version marker (1, 2, or 3) |
 | `.c1` | Backup encryption passphrase |
 | `.c2` | Database username |
 | `.c3` | Database password |
@@ -161,9 +216,10 @@ The following secrets are encrypted and stored securely:
 
 ### Backup Security
 
-1. **Strong Encryption Password**
-   - Use at least 16 characters
-   - Mix uppercase, lowercase, numbers, symbols
+1. **Strong Encryption Password** (enforced during setup)
+   - **Minimum 12 characters** (enforced)
+   - **At least 2 special characters** (enforced)
+   - Recommended: 16+ characters with mix of uppercase, lowercase, numbers
    - Don't reuse passwords from other services
 
 2. **Cloud Storage Security**
@@ -280,6 +336,35 @@ The backup script uses secure practices:
 
 ---
 
+## Update Security
+
+### Current Protections
+
+Updates from GitHub releases include these security measures:
+
+| Protection | Description |
+|------------|-------------|
+| **HTTPS Only** | Downloads enforce `--proto '=https'` - no HTTP downgrade |
+| **SHA256 Verification** | Checksum verification is **required** - updates fail if checksum missing or mismatched |
+| **Fail on HTTP Errors** | curl `-f` flag ensures 404/500 errors are caught |
+| **Empty File Detection** | Downloads verified to be non-empty |
+| **Automatic Rollback** | Failed updates restore previous version |
+| **Verified Dependencies** | rclone installed from GitHub releases with SHA256 verification in both installer and setup wizard (no `curl \| bash`) |
+
+### Future Enhancements
+
+**GPG Signing** (planned for future release):
+- Release archives will be GPG signed
+- Verification will check both SHA256 checksum AND GPG signature
+- Provides cryptographic proof of authenticity from maintainers
+
+Until GPG signing is implemented, users should:
+- Verify they're downloading from the official GitHub repository
+- Check release notes on GitHub before updating
+- Use `--check-update` to review before `--update`
+
+---
+
 ## Compliance Notes
 
 This tool is designed with security in mind but is provided "as is". Users are responsible for:
@@ -295,6 +380,7 @@ This tool is designed with security in mind but is provided "as is". Users are r
 
 | Version | Security Changes |
 |---------|-----------------|
+| 2.1.0 | Argon2id encryption, required checksums, HTTPS-only, verified rclone install, strong password requirements (12+ chars, 2+ special) |
 | 1.5.0 | Secure update system with SHA256 checksum verification of releases |
 | 1.4.2 | Configurable database username (reduced privilege support) |
 | 1.4.1 | Database restore verification prompt (prevents accidental data loss) |

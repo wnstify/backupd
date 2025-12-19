@@ -4,6 +4,82 @@
 # Script generation functions for backup/restore/verify scripts
 # ============================================================================
 
+# ---------- Embedded Crypto Functions Generator ----------
+
+# Generate the crypto functions to embed in scripts
+# These are version-aware and support Argon2id + PBKDF2
+generate_embedded_crypto() {
+  local secrets_dir="$1"
+  local version iterations
+
+  version="$(get_crypto_version "$secrets_dir")"
+  iterations="$(get_pbkdf2_iterations "$version")"
+
+  cat << 'EMBEDDEDCRYPTOEOF'
+# Crypto version and iterations (set at script generation time)
+EMBEDDEDCRYPTOEOF
+
+  echo "CRYPTO_VERSION=$version"
+  echo "PBKDF2_ITERATIONS=$iterations"
+
+  cat << 'EMBEDDEDCRYPTOEOF'
+
+# Argon2id parameters
+ARGON2_TIME=3
+ARGON2_MEMORY=16
+ARGON2_PARALLEL=4
+ARGON2_LENGTH=32
+
+get_machine_id() {
+  if [[ -f /etc/machine-id ]]; then
+    cat /etc/machine-id
+  elif [[ -f /var/lib/dbus/machine-id ]]; then
+    cat /var/lib/dbus/machine-id
+  else
+    echo "$(hostname)$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo 'fallback')"
+  fi
+}
+
+derive_key_sha256() {
+  local secrets_dir="$1"
+  local machine_id salt
+  machine_id="$(get_machine_id)"
+  salt="$(cat "$secrets_dir/.s")"
+  echo -n "${machine_id}${salt}" | sha256sum | cut -d' ' -f1
+}
+
+derive_key_argon2id() {
+  local secrets_dir="$1"
+  local machine_id salt
+  machine_id="$(get_machine_id)"
+  salt="$(cat "$secrets_dir/.s")"
+  echo -n "${machine_id}${salt}" | argon2 "${salt:0:16}" -id \
+    -t "$ARGON2_TIME" -m "$ARGON2_MEMORY" -p "$ARGON2_PARALLEL" -l "$ARGON2_LENGTH" -r
+}
+
+derive_key() {
+  local secrets_dir="$1"
+  if [[ "$CRYPTO_VERSION" == "3" ]]; then
+    if command -v argon2 &>/dev/null; then
+      derive_key_argon2id "$secrets_dir"
+    else
+      echo "[ERROR] Argon2 required but not installed. Run: sudo apt install argon2" >&2
+      return 1
+    fi
+  else
+    derive_key_sha256 "$secrets_dir"
+  fi
+}
+
+get_secret() {
+  local secrets_dir="$1" secret_name="$2" key
+  [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
+  key="$(derive_key "$secrets_dir")" || return 1
+  openssl enc -aes-256-cbc -pbkdf2 -iter "$PBKDF2_ITERATIONS" -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
+}
+EMBEDDEDCRYPTOEOF
+}
+
 # ---------- Generate All Scripts ----------
 
 generate_all_scripts() {
@@ -80,26 +156,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-derive_key() {
-  local secrets_dir="$1"
-  local machine_id salt
-  if [[ -f /etc/machine-id ]]; then
-    machine_id="$(cat /etc/machine-id)"
-  elif [[ -f /var/lib/dbus/machine-id ]]; then
-    machine_id="$(cat /var/lib/dbus/machine-id)"
-  else
-    machine_id="$(hostname)$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo 'fallback')"
-  fi
-  salt="$(cat "$secrets_dir/.s")"
-  echo -n "${machine_id}${salt}" | sha256sum | cut -d' ' -f1
-}
-
-get_secret() {
-  local secrets_dir="$1" secret_name="$2" key
-  [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
-  key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
-}
+%%CRYPTO_FUNCTIONS%%
 
 # Acquire lock (fixed location so it works across runs)
 exec 9>"$LOCK_FILE"
@@ -326,6 +383,16 @@ else
 fi
 DBBACKUPEOF
 
+  # Generate crypto functions and inject them
+  local crypto_functions
+  crypto_functions="$(generate_embedded_crypto "$SECRETS_DIR")"
+
+  # Create temp file with crypto functions for sed
+  local crypto_temp
+  crypto_temp="$(mktemp)"
+  echo "$crypto_functions" > "$crypto_temp"
+
+  # Replace placeholders
   sed -i \
     -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
     -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
@@ -334,6 +401,10 @@ DBBACKUPEOF
     -e "s|%%RETENTION_MINUTES%%|$RETENTION_MINUTES|g" \
     "$SCRIPTS_DIR/db_backup.sh"
 
+  # Replace crypto functions placeholder (multi-line)
+  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/db_backup.sh"
+
+  rm -f "$crypto_temp"
   chmod +x "$SCRIPTS_DIR/db_backup.sh"
 }
 
@@ -346,7 +417,7 @@ generate_db_restore_script() {
 
   cat > "$SCRIPTS_DIR/db_restore.sh" << 'DBRESTOREEOF'
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 umask 077
 
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
@@ -360,21 +431,7 @@ LOCK_FILE="/var/lock/backupd-db.lock"
 SECRET_DB_USER=".c2"
 SECRET_DB_PASS=".c3"
 
-derive_key() {
-  local secrets_dir="$1" machine_id salt
-  if [[ -f /etc/machine-id ]]; then machine_id="$(cat /etc/machine-id)"
-  elif [[ -f /var/lib/dbus/machine-id ]]; then machine_id="$(cat /var/lib/dbus/machine-id)"
-  else machine_id="$(hostname)$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo 'fallback')"; fi
-  salt="$(cat "$secrets_dir/.s")"
-  echo -n "${machine_id}${salt}" | sha256sum | cut -d' ' -f1
-}
-
-get_secret() {
-  local secrets_dir="$1" secret_name="$2" key
-  [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
-  key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
-}
+%%CRYPTO_FUNCTIONS%%
 
 # Acquire lock (wait up to 60 seconds if backup is running)
 exec 9>"$LOCK_FILE"
@@ -605,12 +662,24 @@ echo
 echo "Done."
 DBRESTOREEOF
 
+  # Generate crypto functions and inject them
+  local crypto_functions
+  crypto_functions="$(generate_embedded_crypto "$SECRETS_DIR")"
+
+  local crypto_temp
+  crypto_temp="$(mktemp)"
+  echo "$crypto_functions" > "$crypto_temp"
+
   sed -i \
     -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
     -e "s|%%RCLONE_PATH%%|$RCLONE_PATH|g" \
     -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
     "$SCRIPTS_DIR/db_restore.sh"
 
+  # Replace crypto functions placeholder (multi-line)
+  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/db_restore.sh"
+
+  rm -f "$crypto_temp"
   chmod +x "$SCRIPTS_DIR/db_restore.sh"
 }
 
@@ -627,7 +696,7 @@ generate_files_backup_script() {
 
   cat > "$SCRIPTS_DIR/files_backup.sh" << 'FILESBACKUPEOF'
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -656,21 +725,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-derive_key() {
-  local secrets_dir="$1" machine_id salt
-  if [[ -f /etc/machine-id ]]; then machine_id="$(cat /etc/machine-id)"
-  elif [[ -f /var/lib/dbus/machine-id ]]; then machine_id="$(cat /var/lib/dbus/machine-id)"
-  else machine_id="$(hostname)$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo 'fallback')"; fi
-  salt="$(cat "$secrets_dir/.s")"
-  echo -n "${machine_id}${salt}" | sha256sum | cut -d' ' -f1
-}
-
-get_secret() {
-  local secrets_dir="$1" secret_name="$2" key
-  [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
-  key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
-}
+%%CRYPTO_FUNCTIONS%%
 
 # Acquire lock (fixed location)
 exec 9>"$LOCK_FILE"
@@ -942,6 +997,14 @@ else
 fi
 FILESBACKUPEOF
 
+  # Generate crypto functions and inject them
+  local crypto_functions
+  crypto_functions="$(generate_embedded_crypto "$SECRETS_DIR")"
+
+  local crypto_temp
+  crypto_temp="$(mktemp)"
+  echo "$crypto_functions" > "$crypto_temp"
+
   sed -i \
     -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
     -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
@@ -952,6 +1015,10 @@ FILESBACKUPEOF
     -e "s|%%WEBROOT_SUBDIR%%|$WEBROOT_SUBDIR|g" \
     "$SCRIPTS_DIR/files_backup.sh"
 
+  # Replace crypto functions placeholder (multi-line)
+  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/files_backup.sh"
+
+  rm -f "$crypto_temp"
   chmod +x "$SCRIPTS_DIR/files_backup.sh"
 }
 
@@ -963,7 +1030,7 @@ generate_files_restore_script() {
 
   cat > "$SCRIPTS_DIR/files_restore.sh" << 'FILESRESTOREEOF'
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 umask 077
 
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
@@ -1280,26 +1347,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-derive_key() {
-  local secrets_dir="$1"
-  local machine_id salt
-  if [[ -f /etc/machine-id ]]; then
-    machine_id="$(cat /etc/machine-id)"
-  elif [[ -f /var/lib/dbus/machine-id ]]; then
-    machine_id="$(cat /var/lib/dbus/machine-id)"
-  else
-    machine_id="$(hostname)$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo 'fallback')"
-  fi
-  salt="$(cat "$secrets_dir/.s")"
-  echo -n "${machine_id}${salt}" | sha256sum | cut -d' ' -f1
-}
-
-get_secret() {
-  local secrets_dir="$1" secret_name="$2" key
-  [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
-  key="$(derive_key "$secrets_dir")"
-  openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
-}
+%%CRYPTO_FUNCTIONS%%
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
@@ -1481,6 +1529,14 @@ fi
 exit 0
 VERIFYEOF
 
+  # Generate crypto functions and inject them
+  local crypto_functions
+  crypto_functions="$(generate_embedded_crypto "$secrets_dir")"
+
+  local crypto_temp
+  crypto_temp="$(mktemp)"
+  echo "$crypto_functions" > "$crypto_temp"
+
   # Replace placeholders
   sed -i \
     -e "s|%%LOGS_DIR%%|$INSTALL_DIR/logs|g" \
@@ -1490,5 +1546,9 @@ VERIFYEOF
     -e "s|%%SECRETS_DIR%%|$secrets_dir|g" \
     "$SCRIPTS_DIR/verify_backup.sh"
 
+  # Replace crypto functions placeholder (multi-line)
+  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/verify_backup.sh"
+
+  rm -f "$crypto_temp"
   chmod 700 "$SCRIPTS_DIR/verify_backup.sh"
 }

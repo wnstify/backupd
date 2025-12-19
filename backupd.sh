@@ -15,7 +15,7 @@
 # ============================================================================
 set -euo pipefail
 
-VERSION="2.0.1"
+VERSION="2.1.0"
 AUTHOR="Backupd"
 WEBSITE="https://backupd.io"
 INSTALL_DIR="/etc/backupd"
@@ -48,6 +48,7 @@ fi
 
 # Source all modules in order (dependencies first)
 source "$LIB_DIR/core.sh"       # Colors, print functions, validation, helpers
+source "$LIB_DIR/debug.sh"      # Debug logging (must be early for other modules)
 source "$LIB_DIR/crypto.sh"     # Encryption, secrets, key derivation
 source "$LIB_DIR/config.sh"     # Configuration read/write
 source "$LIB_DIR/generators.sh" # Script generation (needed by setup/schedule)
@@ -101,32 +102,48 @@ uninstall_tool() {
     return
   fi
 
-  # Stop and disable timers
+  # Step 1: Stop timers first (prevents new backup triggers)
+  echo "Stopping timers..."
   systemctl stop backupd-db.timer 2>/dev/null || true
   systemctl stop backupd-files.timer 2>/dev/null || true
   systemctl stop backupd-verify.timer 2>/dev/null || true
+
+  # Step 2: Stop any running services (wait for current backups to finish)
+  echo "Stopping services..."
+  local services_running=false
+  if systemctl is-active --quiet backupd-db.service 2>/dev/null; then
+    echo "  Waiting for database backup to complete..."
+    services_running=true
+  fi
+  if systemctl is-active --quiet backupd-files.service 2>/dev/null; then
+    echo "  Waiting for files backup to complete..."
+    services_running=true
+  fi
+  if systemctl is-active --quiet backupd-verify.service 2>/dev/null; then
+    echo "  Waiting for verification to complete..."
+    services_running=true
+  fi
+
+  # Stop services (will wait for them to finish since they're Type=oneshot)
+  systemctl stop backupd-db.service 2>/dev/null || true
+  systemctl stop backupd-files.service 2>/dev/null || true
+  systemctl stop backupd-verify.service 2>/dev/null || true
+
+  if [[ "$services_running" == "true" ]]; then
+    echo "  Services stopped."
+  fi
+
+  # Step 3: Disable all units
+  echo "Disabling units..."
   systemctl disable backupd-db.timer 2>/dev/null || true
   systemctl disable backupd-files.timer 2>/dev/null || true
   systemctl disable backupd-verify.timer 2>/dev/null || true
+  systemctl disable backupd-db.service 2>/dev/null || true
+  systemctl disable backupd-files.service 2>/dev/null || true
+  systemctl disable backupd-verify.service 2>/dev/null || true
 
-  # Remove cron jobs (legacy)
-  ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/db_backup.sh" | grep -Fv "$SCRIPTS_DIR/files_backup.sh" ) | crontab - 2>/dev/null || true
-
-  # Remove secrets
-  local secrets_dir
-  secrets_dir="$(get_secrets_dir)"
-  if [[ -n "$secrets_dir" && -d "$secrets_dir" ]]; then
-    unlock_secrets "$secrets_dir"
-    rm -rf "$secrets_dir"
-  fi
-
-  # Remove install directory
-  rm -rf "$INSTALL_DIR"
-
-  # Remove command
-  rm -f "/usr/local/bin/backupd"
-
-  # Remove systemd units
+  # Step 4: Remove systemd units BEFORE removing scripts
+  echo "Removing systemd units..."
   rm -f /etc/systemd/system/backupd-db.service
   rm -f /etc/systemd/system/backupd-db.timer
   rm -f /etc/systemd/system/backupd-files.service
@@ -134,6 +151,25 @@ uninstall_tool() {
   rm -f /etc/systemd/system/backupd-verify.service
   rm -f /etc/systemd/system/backupd-verify.timer
   systemctl daemon-reload 2>/dev/null || true
+
+  # Step 5: Remove cron jobs (legacy)
+  ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/db_backup.sh" | grep -Fv "$SCRIPTS_DIR/files_backup.sh" ) | crontab - 2>/dev/null || true
+
+  # Step 6: Remove secrets
+  echo "Removing secrets..."
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+  if [[ -n "$secrets_dir" && -d "$secrets_dir" ]]; then
+    unlock_secrets "$secrets_dir"
+    rm -rf "$secrets_dir"
+  fi
+
+  # Step 7: Remove install directory
+  echo "Removing installation..."
+  rm -rf "$INSTALL_DIR"
+
+  # Step 8: Remove command symlink
+  rm -f "/usr/local/bin/backupd"
 
   print_success "Uninstall complete."
   echo
@@ -207,11 +243,21 @@ show_help() {
   echo "Usage: backupd [OPTIONS]"
   echo
   echo "Options:"
-  echo "  --help, -h          Show this help message"
-  echo "  --version, -v       Show version information"
-  echo "  --update            Check for and install updates"
-  echo "  --check-update      Check for updates (no install)"
-  echo "  --dev-update        Update from develop branch (testing only)"
+  echo "  --help, -h            Show this help message"
+  echo "  --version, -v         Show version information"
+  echo "  --update              Check for and install updates"
+  echo "  --check-update        Check for updates (no install)"
+  echo "  --dev-update          Update from develop branch (testing only)"
+  echo "  --migrate-encryption  Upgrade encryption to best available algorithm"
+  echo "  --encryption-status   Show current encryption algorithm status"
+  echo
+  echo "Debug options:"
+  echo "  --debug               Enable debug logging for this session"
+  echo "  --debug-status        Show debug log status and location"
+  echo "  --debug-export        Export sanitized debug log for sharing"
+  echo
+  echo "Environment variables:"
+  echo "  BACKUPD_DEBUG=1       Enable debug logging"
   echo
   echo "Run without arguments to start the interactive menu."
 }
@@ -222,7 +268,154 @@ show_version() {
   echo "${WEBSITE}"
 }
 
+# ---------- Encryption Management ----------
+
+show_encryption_status() {
+  echo "Encryption Status"
+  echo "================="
+  echo
+
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+
+  if [[ -z "$secrets_dir" || ! -d "$secrets_dir" ]]; then
+    print_warning "No encryption configured (setup not completed)"
+    return 0
+  fi
+
+  local current_version best_version
+  current_version="$(get_crypto_version "$secrets_dir")"
+  best_version="$(get_best_crypto_version)"
+
+  echo "Current algorithm: $(get_crypto_name "$current_version")"
+  echo "Best available:    $(get_crypto_name "$best_version")"
+  echo
+
+  if [[ "$current_version" -lt "$best_version" ]]; then
+    print_warning "Upgrade available!"
+    echo "Run 'backupd --migrate-encryption' to upgrade"
+  else
+    print_success "Using best available encryption"
+  fi
+
+  echo
+  echo "Algorithm details:"
+  echo "  - Argon2id: Memory-hard, GPU/ASIC resistant (requires 'argon2' package)"
+  echo "  - PBKDF2:   CPU-hard, widely compatible"
+  echo
+
+  if ! argon2_available; then
+    print_info "Argon2 not installed. Install with: sudo apt install argon2"
+  fi
+}
+
+do_migrate_encryption() {
+  echo "Encryption Migration"
+  echo "===================="
+  echo
+
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+
+  if [[ -z "$secrets_dir" || ! -d "$secrets_dir" ]]; then
+    print_error "No encryption configured (setup not completed)"
+    return 1
+  fi
+
+  local current_version best_version
+  current_version="$(get_crypto_version "$secrets_dir")"
+  best_version="$(get_best_crypto_version)"
+
+  echo "Current: $(get_crypto_name "$current_version")"
+  echo "Target:  $(get_crypto_name "$best_version")"
+  echo
+
+  if [[ "$current_version" -ge "$best_version" ]]; then
+    print_success "Already using best available encryption"
+    return 0
+  fi
+
+  if [[ "$best_version" == "$CRYPTO_VERSION_ARGON2ID" ]] && ! argon2_available; then
+    print_error "Argon2 not installed"
+    echo
+    echo "Install with: sudo apt install argon2"
+    echo "Then run this command again."
+    return 1
+  fi
+
+  echo "This will:"
+  echo "  1. Decrypt all stored credentials"
+  echo "  2. Re-encrypt with $(get_crypto_name "$best_version")"
+  echo "  3. Regenerate backup scripts"
+  echo
+  print_warning "Make sure you have a backup of your server before proceeding!"
+  echo
+  read -p "Continue? (y/N): " confirm
+
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Cancelled."
+    return 0
+  fi
+
+  echo
+  if migrate_secrets "$secrets_dir" "$current_version" "$best_version"; then
+    print_success "Encryption upgraded successfully!"
+    echo
+    echo "Regenerating backup scripts with new encryption..."
+
+    # Regenerate scripts if configured
+    if is_configured; then
+      regenerate_all_scripts
+      print_success "Backup scripts regenerated"
+    fi
+
+    echo
+    print_success "Migration complete!"
+  else
+    print_error "Migration failed"
+    return 1
+  fi
+}
+
+regenerate_all_scripts() {
+  local secrets_dir rclone_remote rclone_path retention_days
+  secrets_dir="$(get_secrets_dir)"
+  rclone_remote="$(get_config "RCLONE_REMOTE")"
+  rclone_path="$(get_config "RCLONE_PATH")"
+  retention_days="$(get_config "RETENTION_DAYS" "30")"
+
+  local retention_minutes=$((retention_days * 24 * 60))
+
+  # Regenerate DB backup script if DB backup is enabled
+  if [[ "$(get_config "BACKUP_DB")" == "yes" ]]; then
+    generate_db_backup_script "$secrets_dir" "$rclone_remote" "${rclone_path}/databases" "$INSTALL_DIR/logs" "$retention_minutes"
+    generate_db_restore_script "$secrets_dir" "$rclone_remote" "${rclone_path}/databases"
+  fi
+
+  # Regenerate files backup script if files backup is enabled
+  if [[ "$(get_config "BACKUP_FILES")" == "yes" ]]; then
+    local web_path_pattern webroot_subdir
+    web_path_pattern="$(get_config "WEB_PATH_PATTERN" "/var/www/*")"
+    webroot_subdir="$(get_config "WEBROOT_SUBDIR" ".")"
+    generate_files_backup_script "$secrets_dir" "$rclone_remote" "${rclone_path}/files" "$INSTALL_DIR/logs" "$retention_minutes" "$web_path_pattern" "$webroot_subdir"
+    generate_files_restore_script "$rclone_remote" "${rclone_path}/files"
+  fi
+
+  # Regenerate verify script
+  generate_verify_script "$secrets_dir" "$rclone_remote" "$rclone_path"
+}
+
 parse_arguments() {
+  # Handle --debug flag first (can be combined with other args)
+  if [[ "${1:-}" == "--debug" ]]; then
+    DEBUG_ENABLED=1
+    shift
+    # If no more args, continue to menu
+    if [[ -z "${1:-}" ]]; then
+      return 0
+    fi
+  fi
+
   case "${1:-}" in
     --help|-h)
       show_help
@@ -244,6 +437,22 @@ parse_arguments() {
       do_dev_update "develop"
       exit $?
       ;;
+    --migrate-encryption)
+      do_migrate_encryption
+      exit $?
+      ;;
+    --encryption-status)
+      show_encryption_status
+      exit $?
+      ;;
+    --debug-status)
+      debug_status
+      exit 0
+      ;;
+    --debug-export)
+      debug_export
+      exit $?
+      ;;
     "")
       # No arguments, continue to menu
       return 0
@@ -260,7 +469,7 @@ parse_arguments() {
 
 # Parse CLI arguments first (some don't require root)
 case "${1:-}" in
-  --help|-h|--version|-v)
+  --help|-h|--version|-v|--debug-status|--debug-export)
     parse_arguments "$@"
     ;;
 esac
@@ -274,13 +483,25 @@ fi
 # Parse remaining arguments that require root
 parse_arguments "$@"
 
+# Initialize debug logging (after parsing --debug flag)
+debug_init "$@"
+
+# Set up exit trap for debug logging
+trap 'debug_end' EXIT
+
+# Log startup
+debug_info "Backupd starting (PID: $$)"
+
 # Create install directory if needed
 mkdir -p "$INSTALL_DIR"
+debug_trace "Install directory: $INSTALL_DIR"
 
 # Install command if not already installed
 if [[ ! -L "/usr/local/bin/backupd" ]]; then
+  debug_info "Installing backupd command"
   install_command
 fi
 
 # Run main menu
+debug_info "Entering main menu"
 main_menu

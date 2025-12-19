@@ -170,39 +170,60 @@ download_update() {
 
   print_info "Downloading version ${version}..."
 
-  # Download release archive
-  if ! curl -sL --connect-timeout 10 "$release_url" -o "${temp_dir}/update.tar.gz"; then
+  # Download release archive with strict security options
+  # -s: silent, -f: fail on HTTP errors, -L: follow redirects
+  # --proto '=https': only allow HTTPS protocol
+  if ! curl -sfL --proto '=https' --connect-timeout 10 --max-time 300 "$release_url" -o "${temp_dir}/update.tar.gz"; then
     print_error "Failed to download update"
     return 1
   fi
 
-  # Download checksum (optional, don't fail if not available)
-  local checksum_file="${temp_dir}/SHA256SUMS"
-  if curl -sL --connect-timeout 10 "$checksum_url" -o "$checksum_file" 2>/dev/null; then
-    print_info "Verifying checksum..."
-
-    # Extract expected checksum for our file
-    local expected_checksum
-    expected_checksum=$(grep "backupd-v${version}.tar.gz" "$checksum_file" 2>/dev/null | awk '{print $1}')
-
-    if [[ -n "$expected_checksum" ]]; then
-      local actual_checksum
-      actual_checksum=$(sha256sum "${temp_dir}/update.tar.gz" | awk '{print $1}')
-
-      if [[ "$expected_checksum" != "$actual_checksum" ]]; then
-        print_error "Checksum verification failed!"
-        print_error "Expected: $expected_checksum"
-        print_error "Got:      $actual_checksum"
-        return 1
-      fi
-      print_success "Checksum verified"
-    else
-      print_warning "Checksum not found in SHA256SUMS, skipping verification"
-    fi
-  else
-    print_warning "Checksum file not available, skipping verification"
+  # Verify download is not empty
+  if [[ ! -s "${temp_dir}/update.tar.gz" ]]; then
+    print_error "Downloaded file is empty"
+    return 1
   fi
 
+  # Download and verify checksum (REQUIRED for security)
+  local checksum_file="${temp_dir}/SHA256SUMS"
+  print_info "Downloading checksum..."
+
+  if ! curl -sfL --proto '=https' --connect-timeout 10 "$checksum_url" -o "$checksum_file" 2>/dev/null; then
+    print_error "Failed to download checksum file"
+    print_error "Updates require SHA256 verification for security"
+    return 1
+  fi
+
+  # Verify checksum file is not empty
+  if [[ ! -s "$checksum_file" ]]; then
+    print_error "Checksum file is empty or invalid"
+    return 1
+  fi
+
+  print_info "Verifying checksum..."
+
+  # Extract expected checksum for our file
+  local expected_checksum
+  expected_checksum=$(grep "backupd-v${version}.tar.gz" "$checksum_file" 2>/dev/null | awk '{print $1}')
+
+  if [[ -z "$expected_checksum" ]]; then
+    print_error "Checksum for backupd-v${version}.tar.gz not found in SHA256SUMS"
+    print_error "This may indicate a corrupted or tampered release"
+    return 1
+  fi
+
+  local actual_checksum
+  actual_checksum=$(sha256sum "${temp_dir}/update.tar.gz" | awk '{print $1}')
+
+  if [[ "$expected_checksum" != "$actual_checksum" ]]; then
+    print_error "Checksum verification failed!"
+    print_error "Expected: $expected_checksum"
+    print_error "Got:      $actual_checksum"
+    print_error "The download may be corrupted or tampered with"
+    return 1
+  fi
+
+  print_success "Checksum verified"
   return 0
 }
 
@@ -448,7 +469,13 @@ download_from_branch() {
 
   local url="${GITHUB_RAW_URL}/${branch}/${file_path}"
 
-  if ! curl -sL --connect-timeout 10 "$url" -o "$dest_path" 2>/dev/null; then
+  # Use strict curl options for security
+  if ! curl -sfL --proto '=https' --connect-timeout 10 "$url" -o "$dest_path" 2>/dev/null; then
+    return 1
+  fi
+
+  # Verify file is not empty
+  if [[ ! -s "$dest_path" ]]; then
     return 1
   fi
 
@@ -496,6 +523,7 @@ do_dev_update() {
   local main_script="backupd.sh"
   local lib_files=(
     "lib/core.sh"
+    "lib/debug.sh"
     "lib/crypto.sh"
     "lib/config.sh"
     "lib/generators.sh"

@@ -96,6 +96,7 @@ That's it! The wizard will guide you through configuration.
 | **systemd** | For scheduled backups |
 | **pigz** | Auto-installed (parallel gzip) |
 | **rclone** | Auto-installed (cloud storage) |
+| **argon2** | Auto-installed (modern encryption, falls back to PBKDF2 if unavailable) |
 
 ---
 
@@ -106,6 +107,7 @@ That's it! The wizard will guide you through configuration.
 ├── backupd.sh                # Main script (entry point)
 ├── lib/                      # Modular library
 │   ├── core.sh               # Colors, validation, helpers
+│   ├── debug.sh              # Debug logging (sanitized)
 │   ├── crypto.sh             # Encryption, secrets
 │   ├── config.sh             # Configuration read/write
 │   ├── generators.sh         # Script generation
@@ -130,6 +132,7 @@ That's it! The wizard will guide you through configuration.
 
 /etc/.{random}/               # Encrypted secrets (hidden, immutable)
 ├── .s                        # Salt for key derivation
+├── .algo                     # Encryption version (1, 2, or 3)
 ├── .c1                       # Encryption passphrase
 ├── .c2                       # Database username
 ├── .c3                       # Database password
@@ -159,7 +162,7 @@ sudo backupd
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
-║                    Backupd v2.0.1                         ║
+║                    Backupd v2.1.0                         ║
 ║                       by Backupd                          ║
 ╚═══════════════════════════════════════════════════════════╝
 
@@ -211,31 +214,67 @@ systemctl list-timers | grep backupd
 systemctl status backupd-db.timer
 ```
 
+### Debug Logging
+
+For troubleshooting issues, enable debug logging:
+
+```bash
+# Enable debug mode for a session
+BACKUPD_DEBUG=1 sudo backupd
+
+# Or use the --debug flag
+sudo backupd --debug
+
+# Check debug log status
+sudo backupd --debug-status
+
+# Export sanitized log for sharing (safe - no passwords/secrets)
+sudo backupd --debug-export
+```
+
+Debug logs are stored at `/etc/backupd/logs/debug.log` and automatically:
+- Redact sensitive data (passwords, tokens, secret paths)
+- Rotate when exceeding 5MB
+- Include system info, timestamps, and call stacks
+
 ---
 
 ## Security
 
 ### How Credentials Are Protected
 
+**Modern encryption (v2.1.0+):**
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
-│   machine-id    │────▶│   + salt     │────▶│  SHA256 hash    │
+│   machine-id    │────▶│   + salt     │────▶│    Argon2id     │
 │  (unique/server)│     │  (random)    │     │  (derived key)  │
 └─────────────────┘     └──────────────┘     └────────┬────────┘
                                                       │
                                                       ▼
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
 │  Your secrets   │────▶│   AES-256    │────▶│  .enc files     │
-│  (credentials)  │     │  encryption  │     │  (encrypted)    │
+│  (credentials)  │     │  + PBKDF2    │     │  (encrypted)    │
 └─────────────────┘     └──────────────┘     └─────────────────┘
 ```
 
 **Protection includes:**
+- **Strong password requirements** — 12+ characters, 2+ special characters (enforced)
+- **Argon2id key derivation** (memory-hard, GPU/ASIC resistant) — default when `argon2` installed
+- **PBKDF2-SHA256 fallback** (800,000 iterations) — if argon2 not available
 - AES-256-CBC encryption for all credentials
 - Machine-bound keys (won't decrypt on another server)
 - Random directory names (`/etc/.{random}/`)
 - Immutable file flags (`chattr +i`)
 - No plain-text credentials stored anywhere
+
+**Encryption management:**
+```bash
+# Check current encryption status
+sudo backupd --encryption-status
+
+# Upgrade existing installation to modern encryption
+sudo backupd --migrate-encryption
+```
 
 ### What This Protects Against
 

@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2025-12-19
+
+### Added
+
+- **Argon2id Encryption** - Modern memory-hard key derivation (default when `argon2` package installed)
+  - GPU/ASIC resistant, recommended by OWASP 2023
+  - Parameters: 64MB memory, 3 iterations, 4 parallel threads
+  - Falls back to PBKDF2-SHA256 if `argon2` not available
+
+- **Enhanced PBKDF2** - Increased iterations from 100,000 to 800,000 for fallback mode
+  - Meets OWASP 2023 recommendations (600,000+ minimum)
+  - Only used when Argon2id not available
+
+- **Encryption Version System** - Backward-compatible versioning for stored credentials
+  - v1 (legacy): SHA256 + PBKDF2 100k iterations
+  - v2 (enhanced): SHA256 + PBKDF2 800k iterations
+  - v3 (modern): Argon2id + PBKDF2 100k iterations
+
+- **Encryption Migration** - One-command upgrade to latest algorithm
+  - `backupd --migrate-encryption` - Upgrade stored credentials
+  - `backupd --encryption-status` - Check current algorithm
+  - Automatic script regeneration after migration
+
+### Changed
+
+- **New installations** - Auto-select best available encryption (Argon2id if installed)
+- **Installer** - Now installs `argon2` package for modern encryption
+
+### Security
+
+- **Argon2id key derivation** - Memory-hard function resistant to:
+  - GPU cracking attacks
+  - ASIC acceleration
+  - Time-memory trade-off attacks
+- **Secret value handling** - Uses `printf '%s'` instead of `echo -n` to prevent value misinterpretation
+- **Required checksum verification** - Updates now fail if SHA256 checksum missing or mismatched
+- **HTTPS-only downloads** - All downloads enforce `--proto '=https'` (no HTTP downgrade)
+- **Stricter curl options** - Added `-f` (fail on errors), empty file detection, timeouts
+- **Verified rclone installation** - Both installer and setup wizard download rclone from GitHub releases with SHA256 checksum verification (replaces unsafe `curl | bash`)
+- **Strong password requirements** - Encryption password now requires:
+  - Minimum 12 characters (up from 8)
+  - At least 2 special characters
+  - Clear requirements shown before password entry
+- **Improved setup wizard** - Shows current encryption algorithm (Argon2id or PBKDF2) during setup
+
+### Added
+
+- **Debug Logging System** - Comprehensive troubleshooting support
+  - Enable with `BACKUPD_DEBUG=1` or `--debug` flag
+  - `--debug-status` shows log location and status
+  - `--debug-export` creates sanitized log safe for sharing
+  - Automatic sensitive data redaction (passwords, tokens, paths)
+  - Session-based logging with timestamps and call stacks
+  - Auto-rotation at 5MB
+
+### Technical
+
+- All generated scripts now embed version-aware crypto functions
+- Fixed missing `-e` flag in generated script `set` statements
+- Existing installations continue working with their current encryption version
+- New `lib/debug.sh` module for debug logging infrastructure
+- Improved uninstall: now stops services before removing files, correct order of operations
+
+---
+
 ## [2.0.1] - 2025-12-13
 
 ### Fixed
@@ -492,6 +557,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 2.1.0 | 2025-12-19 | Argon2id encryption, enhanced PBKDF2, migration support |
+| 2.0.1 | 2025-12-13 | Branding fixes, lock file names |
+| 2.0.0 | 2025-12-13 | Major rebranding to Backupd |
 | 1.6.2 | 2024-12-12 | Fixed ntfy notifications and SIGPIPE in files verification |
 | 1.6.1 | 2024-12-12 | Fixed script exit after banner, missing updater.sh in install |
 | 1.6.0 | 2024-12-12 | Backupd rebranding, new domain backupd.io |

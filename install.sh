@@ -23,6 +23,7 @@ BIN_LINK="/usr/local/bin/backupd"
 # Library modules to download
 LIB_MODULES=(
     "core.sh"
+    "debug.sh"
     "crypto.sh"
     "config.sh"
     "generators.sh"
@@ -127,17 +128,143 @@ install_dependencies() {
         echo -e "  pigz: ${GREEN}OK${NC}"
     fi
 
-    # Install rclone if not present
+    # Install argon2 for modern encryption (recommended)
+    if ! command -v argon2 &> /dev/null; then
+        echo -e "  Installing argon2 (for modern encryption)..."
+        apt-get install -y -qq argon2 2>/dev/null || echo -e "  ${YELLOW}argon2 install failed - will use PBKDF2 fallback${NC}"
+    fi
+    if command -v argon2 &> /dev/null; then
+        echo -e "  argon2: ${GREEN}OK${NC} (Argon2id encryption enabled)"
+    else
+        echo -e "  argon2: ${YELLOW}Not installed - using PBKDF2 encryption (still secure)${NC}"
+    fi
+
+    # Install rclone if not present (with checksum verification)
     if ! command -v rclone &> /dev/null; then
         echo -e "  Installing rclone..."
-        if command -v curl &> /dev/null; then
-            curl -fsSL https://rclone.org/install.sh | bash -s beta 2>/dev/null || true
-        fi
+        install_rclone_verified
     fi
     if command -v rclone &> /dev/null; then
-        echo -e "  rclone: ${GREEN}OK${NC}"
+        local rclone_version
+        rclone_version=$(rclone version 2>/dev/null | head -1 | awk '{print $2}')
+        echo -e "  rclone: ${GREEN}OK${NC} (${rclone_version:-unknown})"
     else
         echo -e "  rclone: ${YELLOW}Not installed - install manually or via setup${NC}"
+    fi
+}
+
+# Install rclone with SHA256 verification
+# NOTE: This function is duplicated in lib/core.sh for the setup wizard.
+#       Keep both copies synchronized when making changes.
+install_rclone_verified() {
+    local arch
+    local os="linux"
+
+    # Detect architecture
+    case "$(uname -m)" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        armv7l)  arch="arm-v7" ;;
+        armv6l)  arch="arm" ;;
+        i686)    arch="386" ;;
+        *)
+            echo -e "    ${YELLOW}Unsupported architecture: $(uname -m)${NC}"
+            echo -e "    ${YELLOW}Please install rclone manually: https://rclone.org/install/${NC}"
+            return 1
+            ;;
+    esac
+
+    # Get latest version from GitHub API
+    local latest_version
+    latest_version=$(curl -sfL --proto '=https' --connect-timeout 10 \
+        "https://api.github.com/repos/rclone/rclone/releases/latest" 2>/dev/null | \
+        grep '"tag_name"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')
+
+    if [[ -z "$latest_version" ]]; then
+        echo -e "    ${YELLOW}Could not determine latest rclone version${NC}"
+        echo -e "    ${YELLOW}Please install rclone manually: https://rclone.org/install/${NC}"
+        return 1
+    fi
+
+    echo -e "    Latest version: v${latest_version}"
+
+    local filename="rclone-v${latest_version}-${os}-${arch}.zip"
+    local download_url="https://github.com/rclone/rclone/releases/download/v${latest_version}/${filename}"
+    local checksum_url="https://github.com/rclone/rclone/releases/download/v${latest_version}/SHA256SUMS"
+
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    trap "rm -rf '$temp_dir'" RETURN
+
+    # Download the archive
+    echo -e "    Downloading ${filename}..."
+    if ! curl -sfL --proto '=https' --connect-timeout 10 --max-time 300 \
+        "$download_url" -o "${temp_dir}/${filename}" 2>/dev/null; then
+        echo -e "    ${YELLOW}Failed to download rclone${NC}"
+        return 1
+    fi
+
+    # Verify download is not empty
+    if [[ ! -s "${temp_dir}/${filename}" ]]; then
+        echo -e "    ${YELLOW}Downloaded file is empty${NC}"
+        return 1
+    fi
+
+    # Download checksum file
+    echo -e "    Verifying checksum..."
+    if ! curl -sfL --proto '=https' --connect-timeout 10 \
+        "$checksum_url" -o "${temp_dir}/SHA256SUMS" 2>/dev/null; then
+        echo -e "    ${YELLOW}Could not download checksum file${NC}"
+        echo -e "    ${YELLOW}Aborting - install rclone manually for security${NC}"
+        return 1
+    fi
+
+    # Extract expected checksum
+    local expected_checksum
+    expected_checksum=$(grep "${filename}" "${temp_dir}/SHA256SUMS" 2>/dev/null | awk '{print $1}')
+
+    if [[ -z "$expected_checksum" ]]; then
+        echo -e "    ${YELLOW}Checksum not found for ${filename}${NC}"
+        echo -e "    ${YELLOW}Aborting - install rclone manually for security${NC}"
+        return 1
+    fi
+
+    # Calculate actual checksum
+    local actual_checksum
+    actual_checksum=$(sha256sum "${temp_dir}/${filename}" | awk '{print $1}')
+
+    if [[ "$expected_checksum" != "$actual_checksum" ]]; then
+        echo -e "    ${RED}Checksum verification FAILED!${NC}"
+        echo -e "    ${RED}Expected: ${expected_checksum}${NC}"
+        echo -e "    ${RED}Got:      ${actual_checksum}${NC}"
+        echo -e "    ${RED}The download may be corrupted or tampered with${NC}"
+        return 1
+    fi
+
+    echo -e "    ${GREEN}Checksum verified${NC}"
+
+    # Extract and install
+    echo -e "    Installing..."
+    if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
+        echo -e "    ${YELLOW}Failed to extract (is unzip installed?)${NC}"
+        # Try to install unzip and retry
+        apt-get install -y -qq unzip 2>/dev/null || true
+        if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
+            echo -e "    ${YELLOW}Failed to extract rclone${NC}"
+            return 1
+        fi
+    fi
+
+    # Copy binary to /usr/bin
+    local rclone_binary="${temp_dir}/rclone-v${latest_version}-${os}-${arch}/rclone"
+    if [[ -f "$rclone_binary" ]]; then
+        cp "$rclone_binary" /usr/bin/rclone
+        chmod 755 /usr/bin/rclone
+        echo -e "    ${GREEN}rclone v${latest_version} installed successfully${NC}"
+        return 0
+    else
+        echo -e "    ${YELLOW}Could not find rclone binary in archive${NC}"
+        return 1
     fi
 }
 
@@ -146,16 +273,22 @@ download_file() {
     local target="$2"
 
     if command -v curl &> /dev/null; then
-        if ! curl -fsSL "$url" -o "$target"; then
+        # Strict curl options:
+        # -f: fail on HTTP errors, -s: silent, -S: show errors, -L: follow redirects
+        # --proto '=https': only allow HTTPS protocol (security)
+        # --connect-timeout: connection timeout, --max-time: total timeout
+        if ! curl -fsSL --proto '=https' --connect-timeout 10 --max-time 60 "$url" -o "$target"; then
             return 1
         fi
     elif command -v wget &> /dev/null; then
-        if ! wget -q "$url" -O "$target"; then
+        # Strict wget options:
+        # --https-only: only allow HTTPS (security)
+        if ! wget -q --https-only --timeout=60 "$url" -O "$target"; then
             return 1
         fi
     fi
 
-    # Verify download
+    # Verify download is not empty
     if [[ ! -s "$target" ]]; then
         return 1
     fi
@@ -324,24 +457,49 @@ print_success() {
 uninstall() {
     echo -e "${YELLOW}Uninstalling Backupd...${NC}"
 
-    # Stop and disable timers
+    # Step 1: Stop timers first (prevents new backup triggers)
+    echo -e "  Stopping timers..."
     systemctl stop backupd-db.timer 2>/dev/null || true
     systemctl stop backupd-files.timer 2>/dev/null || true
     systemctl stop backupd-verify.timer 2>/dev/null || true
+
+    # Step 2: Stop any running services (wait for current backups to finish)
+    echo -e "  Stopping services..."
+    if systemctl is-active --quiet backupd-db.service 2>/dev/null; then
+        echo -e "    Waiting for database backup to complete..."
+    fi
+    if systemctl is-active --quiet backupd-files.service 2>/dev/null; then
+        echo -e "    Waiting for files backup to complete..."
+    fi
+    if systemctl is-active --quiet backupd-verify.service 2>/dev/null; then
+        echo -e "    Waiting for verification to complete..."
+    fi
+
+    # Stop services (will wait for them to finish since they're Type=oneshot)
+    systemctl stop backupd-db.service 2>/dev/null || true
+    systemctl stop backupd-files.service 2>/dev/null || true
+    systemctl stop backupd-verify.service 2>/dev/null || true
+
+    # Step 3: Disable all units
+    echo -e "  Disabling units..."
     systemctl disable backupd-db.timer 2>/dev/null || true
     systemctl disable backupd-files.timer 2>/dev/null || true
     systemctl disable backupd-verify.timer 2>/dev/null || true
+    systemctl disable backupd-db.service 2>/dev/null || true
+    systemctl disable backupd-files.service 2>/dev/null || true
+    systemctl disable backupd-verify.service 2>/dev/null || true
 
-    # Remove systemd units
+    # Step 4: Remove systemd units BEFORE removing scripts
+    echo -e "  Removing systemd units..."
     rm -f /etc/systemd/system/backupd-db.service
     rm -f /etc/systemd/system/backupd-db.timer
     rm -f /etc/systemd/system/backupd-files.service
     rm -f /etc/systemd/system/backupd-files.timer
     rm -f /etc/systemd/system/backupd-verify.service
     rm -f /etc/systemd/system/backupd-verify.timer
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || true
 
-    # Remove symlink
+    # Step 5: Remove symlink
     rm -f "$BIN_LINK"
 
     # Ask about config/secrets
@@ -355,9 +513,9 @@ uninstall() {
             local secrets_dir
             secrets_dir=$(cat "${INSTALL_DIR}/.secrets_location" 2>/dev/null)
             if [[ -n "$secrets_dir" ]] && [[ -d "$secrets_dir" ]]; then
-                # Unlock files first (including .s salt file)
+                # Unlock files first (including .s salt file and .algo version marker)
                 chattr -i "$secrets_dir" 2>/dev/null || true
-                for f in ".s" ".c1" ".c2" ".c3" ".c4" ".c5"; do
+                for f in ".s" ".algo" ".c1" ".c2" ".c3" ".c4" ".c5"; do
                     [[ -f "$secrets_dir/$f" ]] && chattr -i "$secrets_dir/$f" 2>/dev/null || true
                 done
                 rm -rf "$secrets_dir"
@@ -368,7 +526,7 @@ uninstall() {
         for dir in /etc/.*; do
             if [[ -d "$dir" ]] && [[ -f "$dir/.c1" ]]; then
                 chattr -i "$dir" 2>/dev/null || true
-                for f in ".s" ".c1" ".c2" ".c3" ".c4" ".c5"; do
+                for f in ".s" ".algo" ".c1" ".c2" ".c3" ".c4" ".c5"; do
                     [[ -f "$dir/$f" ]] && chattr -i "$dir/$f" 2>/dev/null || true
                 done
                 rm -rf "$dir"

@@ -109,18 +109,50 @@ validate_url() {
   return 0
 }
 
+# Display password requirements
+show_password_requirements() {
+  echo -e "${CYAN}Password Requirements:${NC}"
+  echo "  - At least 12 characters long"
+  echo "  - At least 2 special characters (!@#\$%^&*()_+-=[]{}|;':\",./<>?\`~)"
+  echo
+}
+
+# Count special characters in a string
+count_special_chars() {
+  local str="$1"
+  # Count characters that are NOT alphanumeric
+  local special_only
+  special_only=$(printf '%s' "$str" | tr -d 'a-zA-Z0-9')
+  printf '%s' "${#special_only}"
+}
+
 # Validate password strength
+# Requirements: minimum 12 characters, at least 2 special characters
 validate_password() {
   local password="$1"
-  local min_length="${2:-8}"
+  local min_length="${2:-12}"
+  local min_special="${3:-2}"
+  local show_help="${4:-true}"
 
   if [[ -z "$password" ]]; then
     print_error "Password cannot be empty"
+    [[ "$show_help" == "true" ]] && show_password_requirements
     return 1
   fi
 
+  # Check minimum length
   if [[ ${#password} -lt $min_length ]]; then
-    print_error "Password must be at least $min_length characters"
+    print_error "Password must be at least $min_length characters (yours: ${#password})"
+    [[ "$show_help" == "true" ]] && show_password_requirements
+    return 1
+  fi
+
+  # Check special characters
+  local special_count
+  special_count=$(count_special_chars "$password")
+  if [[ $special_count -lt $min_special ]]; then
+    print_error "Password must contain at least $min_special special characters (yours: $special_count)"
+    [[ "$show_help" == "true" ]] && show_password_requirements
     return 1
   fi
 
@@ -527,4 +559,122 @@ sanitize_for_filename() {
   s="${s%.}"
   [[ -z "$s" ]] && s="unknown-site"
   printf "%s" "$s"
+}
+
+# ---------- Dependency Installation ----------
+
+# Install rclone with SHA256 verification
+# Downloads from GitHub releases with checksum verification for security
+# NOTE: This function is also in install.sh (standalone installer).
+#       Keep both copies synchronized when making changes.
+install_rclone_verified() {
+  local arch
+  local os="linux"
+
+  # Detect architecture
+  case "$(uname -m)" in
+    x86_64)  arch="amd64" ;;
+    aarch64) arch="arm64" ;;
+    armv7l)  arch="arm-v7" ;;
+    armv6l)  arch="arm" ;;
+    i686)    arch="386" ;;
+    *)
+      print_warning "Unsupported architecture: $(uname -m)"
+      print_info "Please install rclone manually: https://rclone.org/install/"
+      return 1
+      ;;
+  esac
+
+  # Get latest version from GitHub API
+  local latest_version
+  latest_version=$(curl -sfL --proto '=https' --connect-timeout 10 \
+    "https://api.github.com/repos/rclone/rclone/releases/latest" 2>/dev/null | \
+    grep '"tag_name"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')
+
+  if [[ -z "$latest_version" ]]; then
+    print_warning "Could not determine latest rclone version"
+    print_info "Please install rclone manually: https://rclone.org/install/"
+    return 1
+  fi
+
+  echo "  Latest version: v${latest_version}"
+
+  local filename="rclone-v${latest_version}-${os}-${arch}.zip"
+  local download_url="https://github.com/rclone/rclone/releases/download/v${latest_version}/${filename}"
+  local checksum_url="https://github.com/rclone/rclone/releases/download/v${latest_version}/SHA256SUMS"
+
+  local temp_dir
+  temp_dir=$(mktemp -d)
+  trap "rm -rf '$temp_dir'" RETURN
+
+  # Download the archive
+  echo "  Downloading ${filename}..."
+  if ! curl -sfL --proto '=https' --connect-timeout 10 --max-time 300 \
+    "$download_url" -o "${temp_dir}/${filename}" 2>/dev/null; then
+    print_error "Failed to download rclone"
+    return 1
+  fi
+
+  # Verify download is not empty
+  if [[ ! -s "${temp_dir}/${filename}" ]]; then
+    print_error "Downloaded file is empty"
+    return 1
+  fi
+
+  # Download checksum file
+  echo "  Verifying checksum..."
+  if ! curl -sfL --proto '=https' --connect-timeout 10 \
+    "$checksum_url" -o "${temp_dir}/SHA256SUMS" 2>/dev/null; then
+    print_error "Could not download checksum file"
+    print_error "Aborting - install rclone manually for security"
+    return 1
+  fi
+
+  # Extract expected checksum
+  local expected_checksum
+  expected_checksum=$(grep "${filename}" "${temp_dir}/SHA256SUMS" 2>/dev/null | awk '{print $1}')
+
+  if [[ -z "$expected_checksum" ]]; then
+    print_error "Checksum not found for ${filename}"
+    print_error "Aborting - install rclone manually for security"
+    return 1
+  fi
+
+  # Calculate actual checksum
+  local actual_checksum
+  actual_checksum=$(sha256sum "${temp_dir}/${filename}" | awk '{print $1}')
+
+  if [[ "$expected_checksum" != "$actual_checksum" ]]; then
+    print_error "Checksum verification FAILED!"
+    print_error "Expected: ${expected_checksum}"
+    print_error "Got:      ${actual_checksum}"
+    print_error "The download may be corrupted or tampered with"
+    return 1
+  fi
+
+  print_success "Checksum verified"
+
+  # Extract and install
+  echo "  Installing..."
+  if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
+    print_warning "Failed to extract (is unzip installed?)"
+    # Try to install unzip and retry
+    apt-get install -y -qq unzip 2>/dev/null || true
+    if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
+      print_error "Failed to extract rclone"
+      return 1
+    fi
+  fi
+
+  # Copy binary to /usr/bin
+  local rclone_binary="${temp_dir}/rclone-v${latest_version}-${os}-${arch}/rclone"
+  if [[ -f "$rclone_binary" ]]; then
+    cp "$rclone_binary" /usr/bin/rclone
+    chmod 755 /usr/bin/rclone
+    print_success "rclone v${latest_version} installed successfully"
+    return 0
+  else
+    print_error "Could not find rclone binary in archive"
+    return 1
+  fi
 }

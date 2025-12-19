@@ -207,9 +207,14 @@ run_setup() {
   # ---------- Step 2: Encryption Password ----------
   echo "Step 2: Encryption Password"
   echo "---------------------------"
-  echo "Your backups will be encrypted with AES-256."
-  echo "Password must be at least 8 characters."
+  if argon2_available; then
+    echo "Your backups will be encrypted with AES-256 + Argon2id key derivation."
+  else
+    echo "Your backups will be encrypted with AES-256 + PBKDF2 key derivation."
+    print_info "Install 'argon2' package for stronger Argon2id encryption."
+  fi
   echo
+  show_password_requirements
   read -sp "Enter encryption password: " ENCRYPTION_PASSWORD
   echo
   read -sp "Confirm encryption password: " ENCRYPTION_PASSWORD_CONFIRM
@@ -221,7 +226,7 @@ run_setup() {
     return
   fi
 
-  if ! validate_password "$ENCRYPTION_PASSWORD" 8; then
+  if ! validate_password "$ENCRYPTION_PASSWORD"; then
     press_enter_to_continue
     return
   fi
@@ -304,15 +309,13 @@ run_setup() {
     INSTALL_RCLONE=${INSTALL_RCLONE:-Y}
 
     if [[ "$INSTALL_RCLONE" =~ ^[Yy]$ ]]; then
-      print_info "Installing rclone..."
-      curl -fsSL https://rclone.org/install.sh | sudo bash
-
-      if ! command -v rclone &>/dev/null; then
+      print_info "Installing rclone with verified download..."
+      if ! install_rclone_verified; then
         print_error "Failed to install rclone."
+        print_info "You can install manually: https://rclone.org/install/"
         press_enter_to_continue
         return
       fi
-      print_success "rclone installed."
     else
       print_error "rclone is required. Please install it and restart setup."
       press_enter_to_continue
