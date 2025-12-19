@@ -11,15 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Quick Verification Mode** - Bandwidth-efficient backup checks for scheduled runs
+- **Automatic Backup Verification** - Enabled by default during setup
+  - Weekly quick check (Sundays 2 AM): Verifies backups exist, no download
+  - Monthly full check (1st of month 3 AM): Downloads and tests decryption
+  - Ensures backups are actually restorable, not just present
+
+- **Quick Verification Mode** - Bandwidth-efficient backup checks
   - Verifies backup existence and checksum files without downloading
   - Ideal for large backups (100+ sites, multi-GB files)
-  - Full test available via interactive menu for monthly validation
+  - Runs weekly by default, configurable via schedule menu
 
-- **30-Day Full Test Reminder** - Proactive backup validation prompts
-  - Tracks last full verification timestamp
-  - Scheduled checks include reminder if full test overdue
-  - Notification includes reminder when full test needed
+- **Monthly Full Verification** - Complete backup validation
+  - Downloads backup and verifies decryption works
+  - Tests archive integrity (file count, structure)
+  - Sends notification with results
+  - Warning shown when attempting to disable (backup hygiene reminder)
 
 - **Argon2id Encryption** - Modern memory-hard key derivation (default when `argon2` package installed)
   - GPU/ASIC resistant, recommended by OWASP 2023

@@ -478,6 +478,100 @@ run_setup() {
     fi
   fi
 
+  # ---------- Step 9: Enable Verification Timers ----------
+  echo
+  echo "Step 9: Backup Verification (recommended)"
+  echo "------------------------------------------"
+  echo
+  echo "Backupd can automatically verify your backups to ensure they're restorable."
+  echo
+
+  # Generate and enable quick verification (weekly by default)
+  echo "Setting up weekly quick verification..."
+  generate_verify_script
+
+  cat > /etc/systemd/system/backupd-verify.service << EOF
+[Unit]
+Description=Backupd - Quick Integrity Verification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$SCRIPTS_DIR/verify_backup.sh
+StandardOutput=journal
+StandardError=journal
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat > /etc/systemd/system/backupd-verify.timer << EOF
+[Unit]
+Description=Backupd - Weekly Quick Integrity Verification
+
+[Timer]
+OnCalendar=Sun *-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable backupd-verify.timer 2>/dev/null
+  systemctl start backupd-verify.timer 2>/dev/null
+  print_success "Weekly quick verification enabled (Sundays at 2 AM)"
+
+  # Generate and enable full verification (monthly by default)
+  echo "Setting up monthly full verification..."
+  generate_full_verify_script
+
+  cat > /etc/systemd/system/backupd-verify-full.service << EOF
+[Unit]
+Description=Backupd - Monthly Full Backup Verification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$SCRIPTS_DIR/verify_full_backup.sh
+StandardOutput=journal
+StandardError=journal
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat > /etc/systemd/system/backupd-verify-full.timer << EOF
+[Unit]
+Description=Backupd - Monthly Full Backup Verification Timer
+
+[Timer]
+OnCalendar=*-*-01 03:00:00
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable backupd-verify-full.timer 2>/dev/null
+  systemctl start backupd-verify-full.timer 2>/dev/null
+  print_success "Monthly full verification enabled (1st of month at 3 AM)"
+
+  echo
+  print_info "Quick check: Verifies backups exist (no download)"
+  print_info "Full check: Downloads and tests decryption monthly"
+  echo
+  print_info "Manage via: sudo backupd → Manage schedules"
+
   # Lock secrets
   lock_secrets "$SECRETS_DIR"
 

@@ -53,13 +53,22 @@ manage_schedules() {
     print_warning "Files: NOT SCHEDULED"
   fi
 
-  # Check integrity check timer
+  # Check quick integrity check timer
   if systemctl is-enabled backupd-verify.timer &>/dev/null; then
     local verify_schedule
     verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify.timer 2>/dev/null | cut -d'=' -f2)
-    print_success "Integrity check (systemd): $verify_schedule"
+    print_success "Quick integrity check (systemd): $verify_schedule"
   else
-    print_warning "Integrity check: NOT SCHEDULED (optional)"
+    print_warning "Quick integrity check: NOT SCHEDULED (optional)"
+  fi
+
+  # Check monthly full verification timer
+  if systemctl is-enabled backupd-verify-full.timer &>/dev/null; then
+    local full_verify_schedule
+    full_verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify-full.timer 2>/dev/null | cut -d'=' -f2)
+    print_success "Monthly full verification (systemd): $full_verify_schedule"
+  else
+    print_warning "Monthly full verification: DISABLED (recommended to enable)"
   fi
 
   # Show retention policy
@@ -79,12 +88,13 @@ manage_schedules() {
   echo "3. Disable database backup schedule"
   echo "4. Disable files backup schedule"
   echo "5. Change retention policy"
-  echo "6. Set/change integrity check schedule (optional)"
-  echo "7. Disable integrity check schedule"
-  echo "8. View timer status"
-  echo "9. Back to main menu"
+  echo "6. Set/change quick integrity check schedule"
+  echo "7. Disable quick integrity check schedule"
+  echo "8. Enable/disable monthly full verification"
+  echo "9. View timer status"
+  echo "0. Back to main menu"
   echo
-  read -p "Select option [1-9]: " schedule_choice
+  read -p "Select option [0-9]: " schedule_choice
 
   case "$schedule_choice" in
     1)
@@ -106,12 +116,15 @@ manage_schedules() {
       set_integrity_check_schedule
       ;;
     7)
-      disable_schedule "verify" "Integrity check"
+      disable_schedule "verify" "Quick integrity check"
       ;;
     8)
+      manage_full_verification_timer
+      ;;
+    9)
       view_timer_status
       ;;
-    9|*)
+    0|*)
       return
       ;;
   esac
@@ -434,12 +447,153 @@ view_timer_status() {
   systemctl status backupd-files.timer --no-pager 2>/dev/null || echo "  Not installed or not running"
   echo
 
-  echo -e "${CYAN}Integrity Check Timer:${NC}"
+  echo -e "${CYAN}Quick Integrity Check Timer:${NC}"
   systemctl status backupd-verify.timer --no-pager 2>/dev/null || echo "  Not installed or not running"
+  echo
+
+  echo -e "${CYAN}Monthly Full Verification Timer:${NC}"
+  systemctl status backupd-verify-full.timer --no-pager 2>/dev/null || echo "  Not installed or not running"
   echo
 
   echo -e "${CYAN}Next scheduled runs:${NC}"
   systemctl list-timers backupd-* --no-pager 2>/dev/null || echo "  No timers scheduled"
+
+  press_enter_to_continue
+}
+
+# ---------- Manage Monthly Full Verification Timer ----------
+
+manage_full_verification_timer() {
+  print_header
+  echo "Monthly Full Verification"
+  echo "========================="
+  echo
+  echo "This downloads and fully verifies your backups every 30 days."
+  echo "It tests decryption and archive integrity to confirm backups"
+  echo "are actually restorable - not just that files exist."
+  echo
+
+  local is_enabled=false
+  if systemctl is-enabled backupd-verify-full.timer &>/dev/null; then
+    is_enabled=true
+    local current_schedule
+    current_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify-full.timer 2>/dev/null | cut -d'=' -f2)
+    print_success "Status: ENABLED (Schedule: $current_schedule)"
+  else
+    print_warning "Status: DISABLED"
+  fi
+
+  echo
+  echo "Options:"
+  echo "1. Enable monthly full verification (recommended)"
+  echo "2. Disable monthly full verification"
+  echo "3. Back"
+  echo
+  read -p "Select option [1-3]: " full_verify_choice
+
+  case "$full_verify_choice" in
+    1)
+      enable_full_verification_timer
+      ;;
+    2)
+      disable_full_verification_timer
+      ;;
+    3|*)
+      return
+      ;;
+  esac
+}
+
+# Enable the monthly full verification timer
+enable_full_verification_timer() {
+  echo
+  echo "Generating full verification script..."
+
+  # Generate the full verification script
+  generate_full_verify_script
+
+  # Create systemd service
+  cat > /etc/systemd/system/backupd-verify-full.service << EOF
+[Unit]
+Description=Backupd - Monthly Full Backup Verification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$SCRIPTS_DIR/verify_full_backup.sh
+StandardOutput=journal
+StandardError=journal
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Create systemd timer (runs on 1st of each month at 3 AM)
+  cat > /etc/systemd/system/backupd-verify-full.timer << EOF
+[Unit]
+Description=Backupd - Monthly Full Backup Verification Timer
+
+[Timer]
+OnCalendar=*-*-01 03:00:00
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  # Enable and start timer
+  systemctl daemon-reload
+  systemctl enable backupd-verify-full.timer
+  systemctl start backupd-verify-full.timer
+
+  echo
+  print_success "Monthly full verification enabled"
+  print_info "Schedule: 1st of each month at 3 AM"
+  print_info "Script: $SCRIPTS_DIR/verify_full_backup.sh"
+  print_info "Log: $INSTALL_DIR/logs/verify_logfile.log"
+  echo
+  print_info "Run manually anytime: systemctl start backupd-verify-full"
+  press_enter_to_continue
+}
+
+# Disable the monthly full verification timer (with warning)
+disable_full_verification_timer() {
+  echo
+  echo -e "${YELLOW}════════════════════════════════════════════════════════════${NC}"
+  echo -e "${YELLOW}                     ⚠️  WARNING ⚠️${NC}"
+  echo -e "${YELLOW}════════════════════════════════════════════════════════════${NC}"
+  echo
+  echo "Disabling monthly full verification means:"
+  echo
+  echo "  • You will NOT automatically test if backups are restorable"
+  echo "  • Backup corruption may go undetected for months"
+  echo "  • When disaster strikes, you might find backups unusable"
+  echo
+  echo -e "${CYAN}Best Practice:${NC}"
+  echo "  Keep monthly verification enabled. It runs once per month,"
+  echo "  downloads one backup of each type, and confirms you can"
+  echo "  actually restore from it. This is essential backup hygiene."
+  echo
+  echo -e "${YELLOW}════════════════════════════════════════════════════════════${NC}"
+  echo
+
+  read -p "Are you sure you want to disable monthly verification? (yes/no): " confirm
+
+  if [[ "$confirm" == "yes" ]]; then
+    systemctl stop backupd-verify-full.timer 2>/dev/null || true
+    systemctl disable backupd-verify-full.timer 2>/dev/null || true
+    echo
+    print_warning "Monthly full verification DISABLED"
+    echo
+    echo "To re-enable: sudo backupd → Manage schedules → Enable monthly full verification"
+  else
+    echo
+    print_info "Monthly full verification remains enabled (good choice!)"
+  fi
 
   press_enter_to_continue
 }
