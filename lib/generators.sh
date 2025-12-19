@@ -1423,75 +1423,99 @@ db_details=""
 files_result="SKIPPED"
 files_details=""
 
-# Quick verify database backup (no download)
+# Quick verify ALL database backups (no download)
 if [[ -n "$RCLONE_DB_PATH" ]]; then
-  log "Checking database backup..."
-  latest_db=$(rclone lsf "$RCLONE_REMOTE:$RCLONE_DB_PATH" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null | sort -r | head -1)
+  log "Checking database backups..."
 
-  if [[ -z "$latest_db" ]]; then
+  db_total=0
+  db_with_checksum=0
+  db_without_checksum=0
+  db_total_size=0
+
+  # Get all database backup files
+  while IFS= read -r backup_file; do
+    [[ -z "$backup_file" ]] && continue
+    ((db_total++))
+
+    # Get file size
+    file_info=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_DB_PATH/$backup_file" 2>/dev/null)
+    if [[ -n "$file_info" ]]; then
+      file_size=$(echo "$file_info" | awk '{print $1}')
+      db_total_size=$((db_total_size + file_size))
+
+      # Check if checksum file exists
+      checksum_file="${backup_file}.sha256"
+      if rclone lsf "$RCLONE_REMOTE:$RCLONE_DB_PATH/$checksum_file" &>/dev/null; then
+        ((db_with_checksum++))
+      else
+        ((db_without_checksum++))
+        log "  [WARNING] Missing checksum: $backup_file"
+      fi
+    else
+      log "  [ERROR] Not accessible: $backup_file"
+    fi
+  done < <(rclone lsf "$RCLONE_REMOTE:$RCLONE_DB_PATH" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null)
+
+  if [[ $db_total -eq 0 ]]; then
     log "[WARNING] No database backups found"
     db_result="FAILED"
     db_details="No backups found"
+  elif [[ $db_without_checksum -gt 0 ]]; then
+    log "Database backups: $db_total total, $db_with_checksum with checksum, $db_without_checksum missing checksum"
+    db_result="WARNING"
+    db_details="$db_total backups ($(format_size "$db_total_size")), $db_without_checksum missing checksums"
   else
-    log "Latest: $latest_db"
-
-    # Check file exists and get size (no download)
-    file_info=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_DB_PATH/$latest_db" 2>/dev/null)
-    if [[ -n "$file_info" ]]; then
-      file_size=$(echo "$file_info" | awk '{print $1}')
-
-      # Check if checksum file exists
-      checksum_file="${latest_db}.sha256"
-      if rclone lsf "$RCLONE_REMOTE:$RCLONE_DB_PATH/$checksum_file" &>/dev/null; then
-        log "Backup exists: $(format_size "$file_size"), checksum file present"
-        db_result="PASSED"
-        db_details="$(format_size "$file_size")"
-      else
-        log "[WARNING] Backup exists but no checksum file"
-        db_result="WARNING"
-        db_details="no checksum"
-      fi
-    else
-      log "[ERROR] Backup file not accessible"
-      db_result="FAILED"
-      db_details="File not accessible"
-    fi
+    log "Database backups: $db_total total, all have checksums, total size: $(format_size "$db_total_size")"
+    db_result="PASSED"
+    db_details="$db_total backups ($(format_size "$db_total_size"))"
   fi
 fi
 
-# Quick verify files backup (no download)
+# Quick verify ALL files backups (no download)
 if [[ -n "$RCLONE_FILES_PATH" ]]; then
-  log "Checking files backup..."
-  latest_files=$(rclone lsf "$RCLONE_REMOTE:$RCLONE_FILES_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r | head -1)
+  log "Checking files backups..."
 
-  if [[ -z "$latest_files" ]]; then
+  files_total=0
+  files_with_checksum=0
+  files_without_checksum=0
+  files_total_size=0
+
+  # Get all files backup files
+  while IFS= read -r backup_file; do
+    [[ -z "$backup_file" ]] && continue
+    ((files_total++))
+
+    # Get file size
+    file_info=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$backup_file" 2>/dev/null)
+    if [[ -n "$file_info" ]]; then
+      file_size=$(echo "$file_info" | awk '{print $1}')
+      files_total_size=$((files_total_size + file_size))
+
+      # Check if checksum file exists
+      checksum_file="${backup_file}.sha256"
+      if rclone lsf "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$checksum_file" &>/dev/null; then
+        ((files_with_checksum++))
+      else
+        ((files_without_checksum++))
+        log "  [WARNING] Missing checksum: $backup_file"
+      fi
+    else
+      log "  [ERROR] Not accessible: $backup_file"
+    fi
+  done < <(rclone lsf "$RCLONE_REMOTE:$RCLONE_FILES_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null)
+
+  if [[ $files_total -eq 0 ]]; then
     log "[WARNING] No files backups found"
     files_result="FAILED"
     files_details="No backups found"
+  elif [[ $files_without_checksum -gt 0 ]]; then
+    log "Files backups: $files_total total, $files_with_checksum with checksum, $files_without_checksum missing checksum"
+    files_result="WARNING"
+    files_details="$files_total backups ($(format_size "$files_total_size")), $files_without_checksum missing checksums"
   else
-    log "Latest: $latest_files"
-
-    # Check file exists and get size (no download)
-    file_info=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$latest_files" 2>/dev/null)
-    if [[ -n "$file_info" ]]; then
-      file_size=$(echo "$file_info" | awk '{print $1}')
-
-      # Check if checksum file exists
-      checksum_file="${latest_files}.sha256"
-      if rclone lsf "$RCLONE_REMOTE:$RCLONE_FILES_PATH/$checksum_file" &>/dev/null; then
-        log "Backup exists: $(format_size "$file_size"), checksum file present"
-        files_result="PASSED"
-        files_details="$(format_size "$file_size")"
-      else
-        log "[WARNING] Backup exists but no checksum file"
-        files_result="WARNING"
-        files_details="no checksum"
-      fi
-    else
-      log "[ERROR] Backup file not accessible"
-      files_result="FAILED"
-      files_details="File not accessible"
-    fi
+    log "Files backups: $files_total total, all have checksums, total size: $(format_size "$files_total_size")"
+    files_result="PASSED"
+    files_details="$files_total backups ($(format_size "$files_total_size"))"
   fi
 fi
 
