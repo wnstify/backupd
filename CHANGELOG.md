@@ -28,12 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Warning shown when attempting to disable (backup hygiene reminder)
 
 - **Argon2id Encryption** - Modern memory-hard key derivation (default when `argon2` package installed)
-  - GPU/ASIC resistant, recommended by OWASP 2023
+  - GPU/ASIC resistant, recommended by OWASP
   - Parameters: 64MB memory, 3 iterations, 4 parallel threads
   - Falls back to PBKDF2-SHA256 if `argon2` not available
 
 - **Enhanced PBKDF2** - Increased iterations from 100,000 to 800,000 for fallback mode
-  - Meets OWASP 2023 recommendations (600,000+ minimum)
+  - Meets OWASP recommendations (600,000+ minimum)
   - Only used when Argon2id not available
 
 - **Encryption Version System** - Backward-compatible versioning for stored credentials
