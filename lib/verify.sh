@@ -9,6 +9,7 @@ LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
 FULL_VERIFY_INTERVAL_DAYS=30
 
 # ---------- Quick Verification (Checksum-only, no download) ----------
+# Optimized: Uses only 1 API call per backup type (lists all files at once)
 
 verify_quick() {
   local backup_type="$1"  # "db", "files", or "both"
@@ -26,33 +27,56 @@ verify_quick() {
     numfmt --to=iec-i --suffix=B "$1" 2>/dev/null || echo "${1}B"
   }
 
-  # Check ALL database backups
+  # Check ALL database backups (single API call)
   if [[ "$backup_type" == "db" || "$backup_type" == "both" ]] && [[ -n "$rclone_db_path" ]]; then
     echo "Checking database backups (quick)..."
 
     local db_total=0 db_with_checksum=0 db_without_checksum=0 db_total_size=0
+    declare -A checksum_files=()
 
-    while IFS= read -r backup_file; do
-      [[ -z "$backup_file" ]] && continue
-      ((db_total++))
+    # Single API call: get all files with sizes
+    local all_files
+    all_files=$(rclone lsl "$rclone_remote:$rclone_db_path" 2>/dev/null)
 
-      local file_info file_size
-      file_info=$(rclone lsl "$rclone_remote:$rclone_db_path/$backup_file" 2>/dev/null)
-      if [[ -n "$file_info" ]]; then
-        file_size=$(echo "$file_info" | awk '{print $1}')
-        db_total_size=$((db_total_size + file_size))
+    # Build set of checksum files and process backups
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local size filename
+      size=$(echo "$line" | awk '{print $1}')
+      filename=$(echo "$line" | awk '{print $NF}')
 
-        local checksum_file="${backup_file}.sha256"
-        if rclone lsf "$rclone_remote:$rclone_db_path/$checksum_file" &>/dev/null; then
-          ((db_with_checksum++))
+      if [[ "$filename" == *.sha256 ]]; then
+        checksum_files["$filename"]=1
+      elif [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
+        ((db_total++)) || true
+        db_total_size=$((db_total_size + size))
+
+        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
+          ((db_with_checksum++)) || true
         else
-          ((db_without_checksum++))
-          echo "  Missing checksum: $backup_file"
+          # Check if checksum exists (might come later in list)
+          :
         fi
-      else
-        echo "  Not accessible: $backup_file"
       fi
-    done < <(rclone lsf "$rclone_remote:$rclone_db_path" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null)
+    done <<< "$all_files"
+
+    # Second pass: check which backups have checksums
+    db_with_checksum=0
+    db_without_checksum=0
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local filename
+      filename=$(echo "$line" | awk '{print $NF}')
+
+      if [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
+        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
+          ((db_with_checksum++)) || true
+        else
+          ((db_without_checksum++)) || true
+          echo "  Missing checksum: $filename"
+        fi
+      fi
+    done <<< "$all_files"
 
     if [[ $db_total -eq 0 ]]; then
       db_result="FAILED"
@@ -74,33 +98,47 @@ verify_quick() {
     fi
   fi
 
-  # Check ALL files backups
+  # Check ALL files backups (single API call)
   if [[ "$backup_type" == "files" || "$backup_type" == "both" ]] && [[ -n "$rclone_files_path" ]]; then
     echo "Checking files backups (quick)..."
 
     local files_total=0 files_with_checksum=0 files_without_checksum=0 files_total_size=0
+    declare -A checksum_files=()
 
-    while IFS= read -r backup_file; do
-      [[ -z "$backup_file" ]] && continue
-      ((files_total++))
+    # Single API call: get all files with sizes
+    local all_files
+    all_files=$(rclone lsl "$rclone_remote:$rclone_files_path" 2>/dev/null)
 
-      local file_info file_size
-      file_info=$(rclone lsl "$rclone_remote:$rclone_files_path/$backup_file" 2>/dev/null)
-      if [[ -n "$file_info" ]]; then
-        file_size=$(echo "$file_info" | awk '{print $1}')
-        files_total_size=$((files_total_size + file_size))
+    # First pass: build checksum set and count backups
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local size filename
+      size=$(echo "$line" | awk '{print $1}')
+      filename=$(echo "$line" | awk '{print $NF}')
 
-        local checksum_file="${backup_file}.sha256"
-        if rclone lsf "$rclone_remote:$rclone_files_path/$checksum_file" &>/dev/null; then
-          ((files_with_checksum++))
-        else
-          ((files_without_checksum++))
-          echo "  Missing checksum: $backup_file"
-        fi
-      else
-        echo "  Not accessible: $backup_file"
+      if [[ "$filename" == *.sha256 ]]; then
+        checksum_files["$filename"]=1
+      elif [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
+        ((files_total++)) || true
+        files_total_size=$((files_total_size + size))
       fi
-    done < <(rclone lsf "$rclone_remote:$rclone_files_path" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null)
+    done <<< "$all_files"
+
+    # Second pass: check which backups have checksums
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local filename
+      filename=$(echo "$line" | awk '{print $NF}')
+
+      if [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
+        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
+          ((files_with_checksum++)) || true
+        else
+          ((files_without_checksum++)) || true
+          echo "  Missing checksum: $filename"
+        fi
+      fi
+    done <<< "$all_files"
 
     if [[ $files_total -eq 0 ]]; then
       files_result="FAILED"
@@ -191,10 +229,10 @@ verify_backup_integrity() {
 
   echo "Verification Options:"
   echo
-  echo "  ${CYAN}Quick Check${NC} (recommended for scheduled runs)"
+  echo -e "  ${CYAN}Quick Check${NC} (recommended for scheduled runs)"
   echo "  Verifies backups exist with checksums. No download required."
   echo
-  echo "  ${CYAN}Full Test${NC} (recommended monthly)"
+  echo -e "  ${CYAN}Full Test${NC} (recommended monthly)"
   echo "  Downloads and fully verifies backup decryption and contents."
   echo
   echo "1. Quick check - Database"
