@@ -6,14 +6,20 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/main/install.sh | sudo bash
 #
+# Install from develop branch (testing):
+#   curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh | sudo bash -s -- --branch develop
+#
 # Uninstall:
 #   curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/main/install.sh | sudo bash -s -- --uninstall
 #
 
 set -e
 
-# GitHub raw URL base
-GITHUB_RAW="https://raw.githubusercontent.com/wnstify/backupd/main"
+# Branch to install from (default: main)
+BRANCH="main"
+
+# GitHub raw URL base (will be set after parsing arguments)
+GITHUB_RAW=""
 
 # Installation paths
 INSTALL_DIR="/etc/backupd"
@@ -545,15 +551,46 @@ uninstall() {
     exit 0
 }
 
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --branch|-b)
+                if [[ -n "${2:-}" ]]; then
+                    BRANCH="$2"
+                    shift 2
+                else
+                    echo -e "${RED}Error: --branch requires a branch name${NC}"
+                    exit 1
+                fi
+                ;;
+            --uninstall|-u)
+                check_root
+                uninstall
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    # Set GitHub URL based on branch
+    GITHUB_RAW="https://raw.githubusercontent.com/wnstify/backupd/${BRANCH}"
+}
+
 # Main
 main() {
-    # Check for uninstall flag
-    if [[ "${1:-}" == "--uninstall" ]] || [[ "${1:-}" == "-u" ]]; then
-        check_root
-        uninstall
-    fi
+    # Parse arguments first
+    parse_args "$@"
 
     print_banner
+
+    # Show branch if not main
+    if [[ "$BRANCH" != "main" ]]; then
+        echo -e "${YELLOW}Installing from branch: ${BRANCH}${NC}"
+        echo
+    fi
+
     print_disclaimer
     check_root
     check_system

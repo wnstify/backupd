@@ -84,6 +84,12 @@ sudo backupd
 
 That's it! The wizard will guide you through configuration.
 
+### Install from Develop Branch (Testing)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh | sudo bash -s -- --branch develop
+```
+
 ---
 
 ## Requirements

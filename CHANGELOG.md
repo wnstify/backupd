@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session-based logging with timestamps and call stacks
   - Auto-rotation at 5MB
 
+- **Installer Branch Support** - Install from any branch for testing
+  - `--branch develop` flag for testing pre-release versions
+  - Shows branch name during installation if not main
+
 ### Technical
 
 - All generated scripts now embed version-aware crypto functions
