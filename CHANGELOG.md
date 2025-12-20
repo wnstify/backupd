@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Works alongside or independently of ntfy notifications
   - Configure during setup wizard or reconfiguration
 
+- **Robust Notification Failure Handling**
+  - 3-attempt retry with exponential backoff (2s, 4s, 8s delays)
+  - HTTP status code validation (only 2xx = success)
+  - Dedicated failure log: `/etc/backupd/logs/notification_failures.log`
+  - CRITICAL alert when both ntfy AND webhook channels fail
+  - Prevents silent notification failures that could hide backup problems
+
+- **Monthly Full Verification Timer**
+  - New systemd timer: `backupd-verify-full.timer`
+  - Runs monthly to check if full restore test is needed
+  - Sends reminders if backup restorability was never tested or is overdue
+
+- **Setup Completion Notification**
+  - Sends notification when setup wizard completes successfully
+  - Includes all configured backup types and remote paths
+
 ### Changed
 
 - **HTTPS Enforcement** (Breaking Change for HTTP users)
@@ -51,8 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New encrypted secrets: `.c6` (webhook URL), `.c7` (webhook auth token)
 - Updated `send_notification_all()` function for dual-channel delivery
-- All 22 notification scenarios tested and validated
-- All 19 scripts pass bash syntax validation
+- All 23 notification event types tested and validated (8 success, 8 warning, 7 failure)
+- All scripts pass bash syntax validation
+- `lib/verify.sh` - Added webhook support alongside ntfy
+- `lib/setup.sh` - Added setup_complete notification at end of wizard
+- `lib/generators.sh` - Added retry logic and failure logging to all 4 backup templates
+- `install.sh` - Added backupd-verify-full.service and .timer
 
 ---
 
