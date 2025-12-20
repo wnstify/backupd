@@ -211,33 +211,85 @@ NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 
+# Notification failure log
+NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+
+# Robust ntfy sender with retry (3 attempts, exponential backoff)
 send_ntfy() {
   local title="$1" message="$2"
   [[ -z "$NTFY_URL" ]] && return 0
-  if [[ -n "$NTFY_TOKEN" ]]; then
-    timeout 10 curl -s -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$NTFY_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" \
+        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Title: $title" -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] NTFY FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Robust webhook sender with retry (3 attempts, exponential backoff)
 send_webhook() {
   local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
   [[ -z "$WEBHOOK_URL" ]] && return 0
-  local timestamp json_payload
+
+  local timestamp json_payload http_code
   timestamp="$(date -Iseconds)"
   json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
-  if [[ -n "$WEBHOOK_TOKEN" ]]; then
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$WEBHOOK_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -d "$json_payload" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] WEBHOOK FAILED: event='$event' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Send to both channels, track failures
 send_notification() {
   local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
-  send_ntfy "$title" "$message"
-  send_webhook "$title" "$message" "$event" "$details"
+  local ntfy_ok=0 webhook_ok=0
+
+  send_ntfy "$title" "$message" && ntfy_ok=1
+  send_webhook "$title" "$message" "$event" "$details" && webhook_ok=1
+
+  # CRITICAL: Both channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+    echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
+    echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
+  fi
 }
 
 send_notification "DB Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started"
@@ -797,33 +849,85 @@ NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 
+# Notification failure log
+NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+
+# Robust ntfy sender with retry (3 attempts, exponential backoff)
 send_ntfy() {
   local title="$1" message="$2"
   [[ -z "$NTFY_URL" ]] && return 0
-  if [[ -n "$NTFY_TOKEN" ]]; then
-    timeout 10 curl -s -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$NTFY_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" \
+        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Title: $title" -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] NTFY FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Robust webhook sender with retry (3 attempts, exponential backoff)
 send_webhook() {
   local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
   [[ -z "$WEBHOOK_URL" ]] && return 0
-  local timestamp json_payload
+
+  local timestamp json_payload http_code
   timestamp="$(date -Iseconds)"
   json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
-  if [[ -n "$WEBHOOK_TOKEN" ]]; then
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$WEBHOOK_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -d "$json_payload" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] WEBHOOK FAILED: event='$event' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Send to both channels, track failures
 send_notification() {
   local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
-  send_ntfy "$title" "$message"
-  send_webhook "$title" "$message" "$event" "$details"
+  local ntfy_ok=0 webhook_ok=0
+
+  send_ntfy "$title" "$message" && ntfy_ok=1
+  send_webhook "$title" "$message" "$event" "$details" && webhook_ok=1
+
+  # CRITICAL: Both channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+    echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
+    echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
+  fi
 }
 
 send_notification "Files Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started"
@@ -1409,33 +1513,85 @@ NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
 
+# Notification failure log
+NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+
+# Robust ntfy sender with retry (3 attempts, exponential backoff)
 send_ntfy() {
   local title="$1" message="$2"
   [[ -z "$NTFY_URL" ]] && return 0
-  if [[ -n "$NTFY_TOKEN" ]]; then
-    timeout 10 curl -s -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$NTFY_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" \
+        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Title: $title" -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] NTFY FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Robust webhook sender with retry (3 attempts, exponential backoff)
 send_webhook() {
   local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}"
   [[ -z "$WEBHOOK_URL" ]] && return 0
-  local timestamp json_payload
+
+  local timestamp json_payload http_code
   timestamp="$(date -Iseconds)"
   json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
-  if [[ -n "$WEBHOOK_TOKEN" ]]; then
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$WEBHOOK_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -d "$json_payload" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] WEBHOOK FAILED: event='$event' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Send to both channels, track failures
 send_notification() {
   local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}"
-  send_ntfy "$title" "$message"
-  send_webhook "$title" "$message" "$event" "$details"
+  local ntfy_ok=0 webhook_ok=0
+
+  send_ntfy "$title" "$message" && ntfy_ok=1
+  send_webhook "$title" "$message" "$event" "$details" && webhook_ok=1
+
+  # CRITICAL: Both channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+    echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
+    echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
+  fi
 }
 
 # Log rotation
@@ -1721,33 +1877,86 @@ NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
 
+# Notification failure log
+NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+
+# Robust ntfy sender with retry (3 attempts, exponential backoff)
 send_ntfy() {
   local title="$1" message="$2" priority="${3:-default}"
   [[ -z "$NTFY_URL" ]] && return 0
-  if [[ -n "$NTFY_TOKEN" ]]; then
-    timeout 10 curl -s -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -H "Priority: $priority" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -H "Title: $title" -H "Priority: $priority" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$NTFY_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -H "Priority: $priority" \
+        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -H "Title: $title" -H "Priority: $priority" \
+        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] NTFY FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Robust webhook sender with retry (3 attempts, exponential backoff)
 send_webhook() {
   local title="$1" message="$2" event="${3:-verify_reminder}" details="${4:-"{}"}"
   [[ -z "$WEBHOOK_URL" ]] && return 0
-  local timestamp json_payload
+
+  local timestamp json_payload http_code
   timestamp="$(date -Iseconds)"
   json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
-  if [[ -n "$WEBHOOK_TOKEN" ]]; then
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
-  else
-    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
-  fi
+
+  local attempt=1 max_attempts=3 delay=2
+  while [[ $attempt -le $max_attempts ]]; do
+    if [[ -n "$WEBHOOK_TOKEN" ]]; then
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
+    else
+      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+        -d "$json_payload" 2>/dev/null) || http_code="000"
+    fi
+
+    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] WEBHOOK FAILED: event='$event' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
 }
 
+# Send to both channels, track failures
 send_notification() {
   local title="$1" message="$2" priority="${3:-default}" event="${4:-verify_reminder}"
-  send_ntfy "$title" "$message" "$priority"
-  send_webhook "$title" "$message" "$event"
+  local ntfy_ok=0 webhook_ok=0
+
+  send_ntfy "$title" "$message" "$priority" && ntfy_ok=1
+  send_webhook "$title" "$message" "$event" && webhook_ok=1
+
+  # CRITICAL: Both channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+    echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
+    echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
+  fi
 }
 
 # Check when last full verification was done
