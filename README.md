@@ -21,7 +21,7 @@ This tool provides a complete backup solution for web hosting environments:
 5. **Retention & Cleanup** — Automatic deletion of old backups based on configurable retention policy
 6. **Backup Verification** — Weekly quick checks (no download), monthly reminders to test restorability
 7. **Easy Restore** — Interactive wizard to browse and restore from any backup point
-8. **Notifications** — Optional push notifications via ntfy.sh for backup status alerts
+8. **Notifications** — Optional alerts via ntfy.sh push notifications AND/OR custom webhooks
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -64,7 +64,7 @@ This tool provides exactly that.
 - ⏰ **Automated Scheduling** — Systemd timers with automatic retry and catch-up
 - 🧹 **Retention & Cleanup** — Configurable retention policy with automatic old backup deletion
 - ✅ **Integrity Verification** — SHA256 checksums, quick checks (no download), and monthly full test reminders
-- 🔔 **Notifications** — Optional alerts via ntfy.sh on backup completion/failure
+- 🔔 **Dual-Channel Notifications** — Optional alerts via ntfy.sh AND/OR custom webhooks on backup events
 - 🔄 **Easy Restore** — Interactive restore wizard with safety backups and checksum verification
 - 📋 **Detailed Logging** — Full logs with timestamps and automatic log rotation
 - 🔄 **Auto-Update** — Built-in update system with version checking and one-click updates
@@ -145,7 +145,9 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 ├── .c2                       # Database username
 ├── .c3                       # Database password
 ├── .c4                       # ntfy token (optional)
-└── .c5                       # ntfy URL (optional)
+├── .c5                       # ntfy URL (optional)
+├── .c6                       # webhook URL (optional)
+└── .c7                       # webhook auth token (optional)
 
 /usr/local/bin/backupd            # Symlink for easy access
 
@@ -172,7 +174,7 @@ sudo backupd
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
-║                    Backupd v2.1.0                         ║
+║                    Backupd v2.2.0                         ║
 ║                       by Backupd                          ║
 ╚═══════════════════════════════════════════════════════════╝
 
@@ -453,14 +455,35 @@ This is standard behavior for database backup tools — they backup data, not My
 
 ## Notifications
 
-Optional push notifications via [ntfy.sh](https://ntfy.sh):
+Optional push notifications via [ntfy.sh](https://ntfy.sh) and/or custom webhooks:
 
+### ntfy.sh (Push Notifications)
 1. Install ntfy app on your phone
 2. Subscribe to a topic (e.g., `myserver-backups`)
 3. Configure in backupd settings
 4. Receive alerts on backup success/failure
 
-**Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without ntfy configured - you just won't receive push notifications.
+### Webhooks (Custom Integrations)
+Send backup events to any webhook endpoint (Slack, Discord, custom APIs):
+1. Configure your webhook URL during setup
+2. Optionally add a Bearer token for authentication
+3. Receive JSON payloads with event details
+
+**Webhook JSON payload:**
+```json
+{
+  "event": "backup_complete",
+  "title": "Database Backup Complete",
+  "hostname": "server.example.com",
+  "message": "All 5 databases backed up successfully",
+  "timestamp": "2025-12-20T03:00:00+01:00",
+  "details": {"count": 5, "duration": "45s"}
+}
+```
+
+**Security:** All notification URLs must use HTTPS (enforced).
+
+**Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without notifications configured.
 
 ---
 

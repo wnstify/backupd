@@ -15,7 +15,7 @@
 # ============================================================================
 set -euo pipefail
 
-VERSION="2.1.0"
+VERSION="2.2.0"
 AUTHOR="Backupd"
 WEBSITE="https://backupd.io"
 INSTALL_DIR="/etc/backupd"
@@ -378,31 +378,38 @@ do_migrate_encryption() {
 }
 
 regenerate_all_scripts() {
-  local secrets_dir rclone_remote rclone_path retention_days
+  local secrets_dir rclone_remote rclone_db_path rclone_files_path retention_minutes
   secrets_dir="$(get_secrets_dir)"
-  rclone_remote="$(get_config "RCLONE_REMOTE")"
-  rclone_path="$(get_config "RCLONE_PATH")"
-  retention_days="$(get_config "RETENTION_DAYS" "30")"
-
-  local retention_minutes=$((retention_days * 24 * 60))
+  rclone_remote="$(get_config_value "RCLONE_REMOTE")"
+  rclone_db_path="$(get_config_value "RCLONE_DB_PATH")"
+  rclone_files_path="$(get_config_value "RCLONE_FILES_PATH")"
+  retention_minutes="$(get_config_value "RETENTION_MINUTES")"
+  retention_minutes="${retention_minutes:-43200}"
 
   # Regenerate DB backup script if DB backup is enabled
-  if [[ "$(get_config "BACKUP_DB")" == "yes" ]]; then
-    generate_db_backup_script "$secrets_dir" "$rclone_remote" "${rclone_path}/databases" "$INSTALL_DIR/logs" "$retention_minutes"
-    generate_db_restore_script "$secrets_dir" "$rclone_remote" "${rclone_path}/databases"
+  local do_db
+  do_db="$(get_config_value "DO_DATABASE")"
+  if [[ "$do_db" == "true" ]]; then
+    generate_db_backup_script "$secrets_dir" "$rclone_remote" "$rclone_db_path" "$INSTALL_DIR/logs" "$retention_minutes"
+    generate_db_restore_script "$secrets_dir" "$rclone_remote" "$rclone_db_path"
   fi
 
   # Regenerate files backup script if files backup is enabled
-  if [[ "$(get_config "BACKUP_FILES")" == "yes" ]]; then
+  local do_files
+  do_files="$(get_config_value "DO_FILES")"
+  if [[ "$do_files" == "true" ]]; then
     local web_path_pattern webroot_subdir
-    web_path_pattern="$(get_config "WEB_PATH_PATTERN" "/var/www/*")"
-    webroot_subdir="$(get_config "WEBROOT_SUBDIR" ".")"
-    generate_files_backup_script "$secrets_dir" "$rclone_remote" "${rclone_path}/files" "$INSTALL_DIR/logs" "$retention_minutes" "$web_path_pattern" "$webroot_subdir"
-    generate_files_restore_script "$rclone_remote" "${rclone_path}/files"
+    web_path_pattern="$(get_config_value "WEB_PATH_PATTERN")"
+    web_path_pattern="${web_path_pattern:-/var/www/*}"
+    webroot_subdir="$(get_config_value "WEBROOT_SUBDIR")"
+    webroot_subdir="${webroot_subdir:-.}"
+    generate_files_backup_script "$secrets_dir" "$rclone_remote" "$rclone_files_path" "$INSTALL_DIR/logs" "$retention_minutes" "$web_path_pattern" "$webroot_subdir"
+    generate_files_restore_script "$rclone_remote" "$rclone_files_path"
   fi
 
-  # Regenerate verify script
-  generate_verify_script "$secrets_dir" "$rclone_remote" "$rclone_path"
+  # Regenerate verify scripts
+  generate_verify_script
+  generate_full_verify_script
 }
 
 parse_arguments() {

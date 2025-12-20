@@ -144,6 +144,8 @@ SECRET_DB_USER=".c2"
 SECRET_DB_PASS=".c3"
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
+SECRET_WEBHOOK_URL=".c6"
+SECRET_WEBHOOK_TOKEN=".c7"
 
 # Cleanup function
 TEMP_DIR=""
@@ -206,11 +208,12 @@ PASSPHRASE="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
 
 NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
+WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
+WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 
-send_notification() {
+send_ntfy() {
   local title="$1" message="$2"
   [[ -z "$NTFY_URL" ]] && return 0
-  # Timeout for notification
   if [[ -n "$NTFY_TOKEN" ]]; then
     timeout 10 curl -s -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
   else
@@ -218,7 +221,26 @@ send_notification() {
   fi
 }
 
-[[ -n "$NTFY_URL" ]] && send_notification "DB Backup Started on $HOSTNAME" "Starting at $(date)"
+send_webhook() {
+  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
+  [[ -z "$WEBHOOK_URL" ]] && return 0
+  local timestamp json_payload
+  timestamp="$(date -Iseconds)"
+  json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
+  if [[ -n "$WEBHOOK_TOKEN" ]]; then
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
+  else
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
+  fi
+}
+
+send_notification() {
+  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
+  send_ntfy "$title" "$message"
+  send_webhook "$title" "$message" "$event" "$details"
+}
+
+send_notification "DB Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started"
 
 # Compressor
 if command -v pigz >/dev/null 2>&1; then
@@ -258,7 +280,7 @@ DBS="$($DB_CLIENT "${MYSQL_ARGS[@]}" -NBe 'SHOW DATABASES' 2>/dev/null | grep -E
 
 if [[ -z "$DBS" ]]; then
   echo "[ERROR] No databases found or cannot connect to database"
-  [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Failed on $HOSTNAME" "No databases found"
+  send_notification "DB Backup Failed on $HOSTNAME" "No databases found" "backup_failed"
   exit 6
 fi
 
@@ -282,7 +304,7 @@ done
 
 if [[ $db_count -eq 0 ]]; then
   echo "[ERROR] All database dumps failed"
-  [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Failed on $HOSTNAME" "All dumps failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "All dumps failed" "backup_failed"
   exit 7
 fi
 
@@ -296,7 +318,7 @@ tar -C "$TEMP_DIR" -cf - "$STAMP" | $COMPRESSOR | \
 echo "Verifying archive..."
 if ! gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$ARCHIVE" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
   echo "[ERROR] Archive verification failed"
-  [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Failed on $HOSTNAME" "Archive verification failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "Archive verification failed" "backup_failed"
   exit 4
 fi
 echo "Archive verified."
@@ -312,7 +334,7 @@ echo "Uploading to remote storage..."
 RCLONE_TIMEOUT=1800  # 30 minutes
 if ! timeout $RCLONE_TIMEOUT rclone copy "$ARCHIVE" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 --low-level-retries 10; then
   echo "[ERROR] Upload failed"
-  [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Failed on $HOSTNAME" "Upload failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "Upload failed" "backup_failed"
   exit 8
 fi
 
@@ -360,25 +382,25 @@ if [[ "$RETENTION_MINUTES" -gt 0 ]]; then
 
     if [[ $cleanup_errors -gt 0 ]]; then
       echo "[WARNING] Retention cleanup completed with $cleanup_errors error(s). Removed $cleanup_count old backup(s)."
-      [[ -n "$NTFY_URL" ]] && send_notification "DB Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors"
+      send_notification "DB Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning"
     elif [[ $cleanup_count -gt 0 ]]; then
       echo "Retention cleanup complete. Removed $cleanup_count old backup(s)."
-      [[ -n "$NTFY_URL" ]] && send_notification "DB Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)"
+      send_notification "DB Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup"
     else
       echo "Retention cleanup complete. No old backups to remove."
     fi
   else
     echo "  [WARNING] Could not calculate cutoff time, skipping cleanup"
-    [[ -n "$NTFY_URL" ]] && send_notification "DB Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time"
+    send_notification "DB Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed"
   fi
 fi
 
 if ((${#failures[@]})); then
-  [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Completed with Errors on $HOSTNAME" "Backed up: $db_count, Failed: ${failures[*]}"
+  send_notification "DB Backup Completed with Errors on $HOSTNAME" "Backed up: $db_count, Failed: ${failures[*]}" "backup_warning"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
-  [[ -n "$NTFY_URL" ]] && send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up"
+  send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up" "backup_complete"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
 DBBACKUPEOF
@@ -715,6 +737,8 @@ LOCK_FILE="/var/lock/backupd-files.lock"
 
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
+SECRET_WEBHOOK_URL=".c6"
+SECRET_WEBHOOK_TOKEN=".c7"
 
 # Cleanup function
 TEMP_DIR=""
@@ -770,8 +794,10 @@ fi
 
 NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
+WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
+WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 
-send_notification() {
+send_ntfy() {
   local title="$1" message="$2"
   [[ -z "$NTFY_URL" ]] && return 0
   if [[ -n "$NTFY_TOKEN" ]]; then
@@ -781,7 +807,26 @@ send_notification() {
   fi
 }
 
-[[ -n "$NTFY_URL" ]] && send_notification "Files Backup Started on $HOSTNAME" "Starting at $(date)"
+send_webhook() {
+  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
+  [[ -z "$WEBHOOK_URL" ]] && return 0
+  local timestamp json_payload
+  timestamp="$(date -Iseconds)"
+  json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
+  if [[ -n "$WEBHOOK_TOKEN" ]]; then
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
+  else
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
+  fi
+}
+
+send_notification() {
+  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
+  send_ntfy "$title" "$message"
+  send_webhook "$title" "$message" "$event" "$details"
+}
+
+send_notification "Files Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started"
 
 command -v pigz >/dev/null 2>&1 || { echo "$LOG_PREFIX pigz not found"; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "$LOG_PREFIX tar not found"; exit 1; }
@@ -848,7 +893,7 @@ done
 
 if [[ ${#site_dirs[@]} -eq 0 ]]; then
   echo "$LOG_PREFIX [ERROR] No directories found matching pattern: $WEB_PATH_PATTERN"
-  [[ -n "$NTFY_URL" ]] && send_notification "Files Backup Failed on $HOSTNAME" "No sites found matching pattern"
+  send_notification "Files Backup Failed on $HOSTNAME" "No sites found matching pattern" "backup_failed"
   exit 4
 fi
 
@@ -937,7 +982,7 @@ done
 
 if [[ $site_count -eq 0 ]]; then
   echo "$LOG_PREFIX [WARNING] No sites found in $WWW_DIR"
-  [[ -n "$NTFY_URL" ]] && send_notification "Files Backup Warning on $HOSTNAME" "No sites found"
+  send_notification "Files Backup Warning on $HOSTNAME" "No sites found" "backup_warning"
   echo "==== $(date +%F' '%T) END (no sites) ===="
   exit 0
 fi
@@ -974,25 +1019,25 @@ if [[ "$RETENTION_MINUTES" -gt 0 ]]; then
 
     if [[ $cleanup_errors -gt 0 ]]; then
       echo "$LOG_PREFIX [WARNING] Retention cleanup completed with $cleanup_errors error(s). Removed $cleanup_count old backup(s)."
-      [[ -n "$NTFY_URL" ]] && send_notification "Files Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors"
+      send_notification "Files Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning"
     elif [[ $cleanup_count -gt 0 ]]; then
       echo "$LOG_PREFIX Retention cleanup complete. Removed $cleanup_count old backup(s)."
-      [[ -n "$NTFY_URL" ]] && send_notification "Files Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)"
+      send_notification "Files Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup"
     else
       echo "$LOG_PREFIX Retention cleanup complete. No old backups to remove."
     fi
   else
     echo "$LOG_PREFIX [WARNING] Could not calculate cutoff time, skipping cleanup"
-    [[ -n "$NTFY_URL" ]] && send_notification "Files Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time"
+    send_notification "Files Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed"
   fi
 fi
 
 if [[ ${#failures[@]} -gt 0 ]]; then
-  [[ -n "$NTFY_URL" ]] && send_notification "Files Backup Errors on $HOSTNAME" "Success: $success_count, Failed: ${failures[*]}"
+  send_notification "Files Backup Errors on $HOSTNAME" "Success: $success_count, Failed: ${failures[*]}" "backup_warning"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
-  [[ -n "$NTFY_URL" ]] && send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up"
+  send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up" "backup_complete"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
 FILESBACKUPEOF
@@ -1349,6 +1394,8 @@ FULL_VERIFY_INTERVAL_DAYS=30
 
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
+SECRET_WEBHOOK_URL=".c6"
+SECRET_WEBHOOK_TOKEN=".c7"
 
 %%CRYPTO_FUNCTIONS%%
 
@@ -1356,17 +1403,39 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
-send_notification() {
-  local title="$1" body="$2"
-  local ntfy_url ntfy_token
-  ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
-  ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
-  [[ -z "$ntfy_url" ]] && return 0
-  if [[ -n "$ntfy_token" ]]; then
-    curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $title" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
+# Notification functions
+NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
+NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
+WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
+WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
+
+send_ntfy() {
+  local title="$1" message="$2"
+  [[ -z "$NTFY_URL" ]] && return 0
+  if [[ -n "$NTFY_TOKEN" ]]; then
+    timeout 10 curl -s -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
   else
-    curl -s -H "Title: $title" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    timeout 10 curl -s -H "Title: $title" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
   fi
+}
+
+send_webhook() {
+  local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}"
+  [[ -z "$WEBHOOK_URL" ]] && return 0
+  local timestamp json_payload
+  timestamp="$(date -Iseconds)"
+  json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
+  if [[ -n "$WEBHOOK_TOKEN" ]]; then
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
+  else
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
+  fi
+}
+
+send_notification() {
+  local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}"
+  send_ntfy "$title" "$message"
+  send_webhook "$title" "$message" "$event" "$details"
 }
 
 # Log rotation
@@ -1637,6 +1706,8 @@ FULL_VERIFY_INTERVAL_DAYS=30
 
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
+SECRET_WEBHOOK_URL=".c6"
+SECRET_WEBHOOK_TOKEN=".c7"
 
 %%CRYPTO_FUNCTIONS%%
 
@@ -1644,17 +1715,39 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
-send_notification() {
-  local title="$1" body="$2" priority="${3:-default}"
-  local ntfy_url ntfy_token
-  ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
-  ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
-  [[ -z "$ntfy_url" ]] && return 0
-  if [[ -n "$ntfy_token" ]]; then
-    curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $title" -H "Priority: $priority" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
+# Notification functions
+NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
+NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
+WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
+WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
+
+send_ntfy() {
+  local title="$1" message="$2" priority="${3:-default}"
+  [[ -z "$NTFY_URL" ]] && return 0
+  if [[ -n "$NTFY_TOKEN" ]]; then
+    timeout 10 curl -s -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -H "Priority: $priority" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
   else
-    curl -s -H "Title: $title" -H "Priority: $priority" -d "$body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    timeout 10 curl -s -H "Title: $title" -H "Priority: $priority" -d "$message" "$NTFY_URL" >/dev/null 2>&1 || true
   fi
+}
+
+send_webhook() {
+  local title="$1" message="$2" event="${3:-verify_reminder}" details="${4:-"{}"}"
+  [[ -z "$WEBHOOK_URL" ]] && return 0
+  local timestamp json_payload
+  timestamp="$(date -Iseconds)"
+  json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
+  if [[ -n "$WEBHOOK_TOKEN" ]]; then
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" >/dev/null 2>&1 || true
+  else
+    timeout 10 curl -s -X POST "$WEBHOOK_URL" --proto '=https' -H "Content-Type: application/json" -d "$json_payload" >/dev/null 2>&1 || true
+  fi
+}
+
+send_notification() {
+  local title="$1" message="$2" priority="${3:-default}" event="${4:-verify_reminder}"
+  send_ntfy "$title" "$message" "$priority"
+  send_webhook "$title" "$message" "$event"
 }
 
 # Check when last full verification was done
