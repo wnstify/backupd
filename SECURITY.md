@@ -4,8 +4,9 @@
 
 | Version | Supported          |
 |---------|--------------------|
+| 2.2.x   | :white_check_mark: |
 | 2.1.x   | :white_check_mark: |
-| 2.0.x   | :white_check_mark: |
+| 2.0.x   | :x:                |
 | 1.6.x   | :x:                |
 | 1.5.x   | :x:                |
 | 1.4.x   | :x:                |
@@ -129,6 +130,8 @@ The following secrets are encrypted and stored securely:
 | `.c3` | Database password |
 | `.c4` | ntfy notification token (optional) |
 | `.c5` | ntfy notification URL (optional) |
+| `.c6` | Webhook URL (optional) |
+| `.c7` | Webhook auth token (optional) |
 
 ### Storage Security
 
@@ -387,6 +390,7 @@ This tool is designed with security in mind but is provided "as is". Users are r
 
 | Version | Security Changes |
 |---------|-----------------|
+| 2.2.0 | HTTPS enforcement for all notification URLs (ntfy + webhook), webhook notifications with optional Bearer auth, enhanced reconfigure warning |
 | 2.1.0 | Argon2id encryption, required checksums, HTTPS-only, verified rclone install, strong password requirements (12+ chars, 2+ special), graceful ntfy handling, optimized quick verification |
 | 1.5.0 | Secure update system with SHA256 checksum verification of releases |
 | 1.4.2 | Configurable database username (reduced privilege support) |

@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.0] - 2025-12-20
+
+### Added
+
+- **Webhook Notifications** - Dual-channel notification system
+  - Send backup events to any webhook endpoint (Slack, Discord, custom APIs)
+  - JSON payload with event, title, hostname, message, timestamp, and details
+  - Optional Bearer token authentication for secure endpoints
+  - Works alongside or independently of ntfy notifications
+  - Configure during setup wizard or reconfiguration
+
+### Changed
+
+- **HTTPS Enforcement** (Breaking Change for HTTP users)
+  - All notification URLs (ntfy AND webhook) now require HTTPS
+  - HTTP URLs are rejected with clear error message
+  - Security best practice - no exceptions
+  - Helpful guidance shown when HTTP URL entered
+
+- **Enhanced Reconfigure Warning**
+  - Explicit warning about backup unrecoverability when changing encryption password
+  - Red-highlighted message box with clear consequences
+  - Requires typing `YES` (uppercase) to confirm understanding
+  - Prevents accidental data loss from password changes
+
+### Fixed
+
+- **Webhook JSON Payload** - Added missing `title` field to webhook notifications
+- **JSON Default Value** - Fixed bash syntax error `\{\}` → `${4:-"{}"}` in notification function
+- **Files Backup Warning** - Fixed undefined `$WWW_DIR` variable, now uses `$WEB_PATH_PATTERN`
+- **Verify Hostname** - Fixed wrong variable `$HOSTNAME` → `$hostname_full` in failure notifications
+- **Script Regeneration** - Fixed `get_config()` → `get_config_value()` function calls
+- **Config Key Mismatch** - Fixed `BACKUP_DB` → `DO_DATABASE` config key references
+
+### Security
+
+- **HTTPS-only notifications** - Enforced for all notification channels
+- Prevents credential leakage over unencrypted connections
+- Clear error messages guide users to secure configuration
+
+### Technical
+
+- New encrypted secrets: `.c6` (webhook URL), `.c7` (webhook auth token)
+- Updated `send_notification_all()` function for dual-channel delivery
+- All 22 notification scenarios tested and validated
+- All 19 scripts pass bash syntax validation
+
+---
+
 ## [2.1.0] - 2025-12-19
 
 ### Added
@@ -604,6 +653,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 2.2.0 | 2025-12-20 | Webhook notifications, HTTPS enforcement, enhanced reconfigure warning, 6 bug fixes |
 | 2.1.0 | 2025-12-19 | Argon2id encryption, optimized quick verification, monthly reminder system, graceful ntfy handling |
 | 2.0.1 | 2025-12-13 | Branding fixes, lock file names |
 | 2.0.0 | 2025-12-13 | Major rebranding to Backupd |

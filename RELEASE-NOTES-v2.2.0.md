@@ -7,13 +7,46 @@
 
 ## Overview
 
-Version 2.2.0 is a **security and reliability focused release** that enforces HTTPS for all notification URLs, fixes 6 bugs discovered during comprehensive production-readiness testing, and improves user experience with better warnings and complete webhook support.
+Version 2.2.0 introduces **webhook notifications** for custom integrations (Slack, Discord, etc.), **enforces HTTPS** for all notification URLs, fixes 6 bugs, and improves user experience with better warnings.
+
+**Headline Features:**
+- 🔔 **Webhook Notifications** - Send backup events to any HTTPS endpoint
+- 🔒 **HTTPS Enforcement** - All notification URLs must use HTTPS
+- ⚠️ **Enhanced Warnings** - Clear reconfigure warning about backup unrecoverability
 
 This release was validated through extensive testing covering 22 notification scenarios across both ntfy and webhook channels, with all scenarios passing successfully.
 
 ---
 
 ## Changelog
+
+### New Features
+
+#### Webhook Notifications (Major Feature)
+- **Dual-channel notification system** - Use ntfy AND/OR webhooks
+- Send backup events to any HTTPS endpoint (Slack, Discord, custom APIs)
+- JSON payload includes: `event`, `title`, `hostname`, `message`, `timestamp`, `details`
+- Optional Bearer token authentication for secure endpoints
+- Configure during setup wizard or reconfiguration
+
+**Example webhook payload:**
+```json
+{
+  "event": "backup_complete",
+  "title": "Database Backup Complete",
+  "hostname": "server.example.com",
+  "message": "All 5 databases backed up successfully",
+  "timestamp": "2025-12-20T03:00:00+01:00",
+  "details": {"count": 5, "duration": "45s"}
+}
+```
+
+**Supported integrations:**
+- Slack (Incoming Webhooks)
+- Discord (Channel Webhooks)
+- Microsoft Teams
+- Custom REST APIs
+- Any service accepting JSON POST requests
 
 ### Security Enhancements
 

@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v2.1.0** by Backupd.
+Complete usage documentation for **Backupd v2.2.0** by Backupd.
 
 ## Table of Contents
 
@@ -76,7 +76,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v2.1.0
+              Backupd v2.2.0
                     by Backupd
 ========================================================
 
@@ -108,7 +108,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-              Backupd v2.1.0
+              Backupd v2.2.0
                     by Backupd
 ========================================================
 
@@ -1032,9 +1032,13 @@ Logs are displayed using `less` for easy navigation:
 
 ## Notifications
 
-The tool supports **optional** push notifications via [ntfy.sh](https://ntfy.sh) for backup events.
+The tool supports **optional** dual-channel notifications for backup events:
+- **ntfy.sh** - Push notifications to your phone
+- **Webhooks** - JSON payloads to any endpoint (Slack, Discord, custom APIs)
 
-**Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without ntfy configured - you just won't receive push alerts.
+**Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without notifications configured.
+
+**Security:** All notification URLs must use HTTPS (enforced since v2.2.0).
 
 ### Notification Types
 
@@ -1052,8 +1056,9 @@ The tool supports **optional** push notifications via [ntfy.sh](https://ntfy.sh)
 | **Quick Check Warning** | Backup Quick Check WARNING on hostname | Some backups missing checksums |
 | **Test Reminder** | BACKUP TEST REMINDER on hostname | Last full test was 32 days ago |
 | **Test Required** | BACKUP TEST REQUIRED on hostname | You have NEVER tested your backups! |
+| **Setup Complete** | Backupd Configuration Complete | Successfully configured on hostname |
 
-### Setting Up ntfy
+### Setting Up ntfy (Push Notifications)
 
 1. **Create a topic:**
    - Go to [ntfy.sh](https://ntfy.sh)
@@ -1066,13 +1071,57 @@ The tool supports **optional** push notifications via [ntfy.sh](https://ntfy.sh)
 
 3. **Configure in the tool:**
    ```
-   Manage schedules → Configure notifications
+   Setup wizard → Step 5: Notifications
    ```
 
 4. **Optional: Use authentication:**
    - For private topics, create an account at ntfy.sh
    - Generate an access token
    - Enter the token during setup
+
+### Setting Up Webhooks (Custom Integrations)
+
+1. **Get your webhook URL:**
+   - Slack: Create an Incoming Webhook in your workspace
+   - Discord: Create a webhook in channel settings
+   - Custom: Use any HTTPS endpoint that accepts POST requests
+
+2. **Configure in the tool:**
+   ```
+   Setup wizard → Step 5: Notifications → Webhook URL
+   ```
+
+3. **Optional: Add authentication:**
+   - Enter a Bearer token if your endpoint requires it
+   - Token is sent as: `Authorization: Bearer <token>`
+
+### Webhook JSON Payload
+
+Webhooks receive a JSON payload with the following structure:
+
+```json
+{
+  "event": "backup_complete",
+  "title": "Database Backup Complete",
+  "hostname": "server.example.com",
+  "message": "All 5 databases backed up successfully",
+  "timestamp": "2025-12-20T03:00:00+01:00",
+  "details": {
+    "count": 5,
+    "duration": "45s",
+    "size": "1.2GB"
+  }
+}
+```
+
+**Event types:**
+- `backup_complete` - Backup succeeded
+- `backup_failed` - Backup failed
+- `backup_warning` - Backup completed with warnings
+- `verification_passed` - Backup verification passed
+- `verification_failed` - Backup verification failed
+- `retention_cleanup` - Old backups removed
+- `setup_complete` - Configuration completed
 
 ### Testing Notifications
 
@@ -1082,7 +1131,7 @@ Run a manual backup to test notifications:
 sudo backupd  # Select "Run backup now"
 ```
 
-You should receive a notification on your subscribed devices.
+You should receive notifications on all configured channels (ntfy and/or webhook).
 
 ---
 
