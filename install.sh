@@ -437,6 +437,39 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+    # Verify backup service
+    cat > /etc/systemd/system/backupd-verify.service << 'EOF'
+[Unit]
+Description=Backupd - Backup Verification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/backupd/scripts/verify_backup.sh
+StandardOutput=append:/etc/backupd/logs/verify_logfile.log
+StandardError=append:/etc/backupd/logs/verify_logfile.log
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Verify backup timer (weekly on Sundays at 2am)
+    cat > /etc/systemd/system/backupd-verify.timer << 'EOF'
+[Unit]
+Description=Backupd - Backup Verification Timer
+Requires=backupd-verify.service
+
+[Timer]
+OnCalendar=Sun *-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
     # Reload systemd
     systemctl daemon-reload
 
