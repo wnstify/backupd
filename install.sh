@@ -40,6 +40,7 @@ LIB_MODULES=(
     "schedule.sh"
     "setup.sh"
     "updater.sh"
+    "notifications.sh"
 )
 
 # Colors
