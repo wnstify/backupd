@@ -160,31 +160,49 @@ verify_quick() {
     fi
   fi
 
-  # Send notification
-  local secrets_dir ntfy_url ntfy_token
+  # Send notification (ntfy + webhook)
+  local secrets_dir ntfy_url ntfy_token webhook_url webhook_token
   secrets_dir="$(get_secrets_dir)"
   ntfy_url="$(get_secret "$secrets_dir" ".c5" 2>/dev/null || echo "")"
   ntfy_token="$(get_secret "$secrets_dir" ".c4" 2>/dev/null || echo "")"
+  webhook_url="$(get_secret "$secrets_dir" ".c6" 2>/dev/null || echo "")"
+  webhook_token="$(get_secret "$secrets_dir" ".c7" 2>/dev/null || echo "")"
 
+  local notification_title notification_body event_type
+  local hostname
+  hostname="$(hostname -f 2>/dev/null || hostname)"
+
+  if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
+    notification_title="Quick Check FAILED on $hostname"
+    event_type="verify_failed"
+  elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
+    notification_title="Quick Check WARNING on $hostname"
+    event_type="verify_warning"
+  else
+    notification_title="Quick Check PASSED on $hostname"
+    event_type="verify_passed"
+  fi
+
+  notification_body="DB: $db_result${db_details:+ ($db_details)}, Files: $files_result${files_details:+ ($files_details)}"
+
+  # Send ntfy notification
   if [[ -n "$ntfy_url" ]]; then
-    local notification_title notification_body
-    local hostname
-    hostname="$(hostname -f 2>/dev/null || hostname)"
-
-    if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-      notification_title="Quick Check FAILED on $hostname"
-    elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
-      notification_title="Quick Check WARNING on $hostname"
-    else
-      notification_title="Quick Check PASSED on $hostname"
-    fi
-
-    notification_body="DB: $db_result${db_details:+ ($db_details)}, Files: $files_result${files_details:+ ($files_details)}"
-
     if [[ -n "$ntfy_token" ]]; then
       curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
     else
       curl -s -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    fi
+  fi
+
+  # Send webhook notification
+  if [[ -n "$webhook_url" ]]; then
+    local timestamp json_payload
+    timestamp="$(date -Iseconds)"
+    json_payload="{\"event\":\"$event_type\",\"title\":\"$notification_title\",\"hostname\":\"$hostname\",\"message\":\"$notification_body\",\"timestamp\":\"$timestamp\",\"details\":{\"db_result\":\"$db_result\",\"files_result\":\"$files_result\"}}"
+    if [[ -n "$webhook_token" ]]; then
+      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -H "Authorization: Bearer $webhook_token" -d "$json_payload" -o /dev/null --max-time 10 || true
+    else
+      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -d "$json_payload" -o /dev/null --max-time 10 || true
     fi
   fi
 
@@ -498,26 +516,43 @@ verify_backup_integrity() {
     fi
   fi
 
-  # Send notification
-  local ntfy_url ntfy_token
+  # Send notification (ntfy + webhook)
+  local ntfy_url ntfy_token webhook_url webhook_token
   ntfy_url="$(get_secret "$secrets_dir" ".c5" 2>/dev/null || echo "")"
   ntfy_token="$(get_secret "$secrets_dir" ".c4" 2>/dev/null || echo "")"
+  webhook_url="$(get_secret "$secrets_dir" ".c6" 2>/dev/null || echo "")"
+  webhook_token="$(get_secret "$secrets_dir" ".c7" 2>/dev/null || echo "")"
 
+  local notification_title notification_body event_type
+
+  if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
+    notification_title="Backup Verification FAILED on $HOSTNAME"
+    notification_body="DB: $db_result, Files: $files_result"
+    event_type="full_verify_failed"
+  else
+    notification_title="Backup Verification PASSED on $HOSTNAME"
+    notification_body="DB: $db_result, Files: $files_result"
+    event_type="full_verify_passed"
+  fi
+
+  # Send ntfy notification
   if [[ -n "$ntfy_url" ]]; then
-    local notification_title notification_body
-
-    if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-      notification_title="Backup Verification FAILED on $HOSTNAME"
-      notification_body="DB: $db_result, Files: $files_result"
-    else
-      notification_title="Backup Verification PASSED on $HOSTNAME"
-      notification_body="DB: $db_result, Files: $files_result"
-    fi
-
     if [[ -n "$ntfy_token" ]]; then
       curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
     else
       curl -s -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    fi
+  fi
+
+  # Send webhook notification
+  if [[ -n "$webhook_url" ]]; then
+    local timestamp json_payload
+    timestamp="$(date -Iseconds)"
+    json_payload="{\"event\":\"$event_type\",\"title\":\"$notification_title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$notification_body\",\"timestamp\":\"$timestamp\",\"details\":{\"db_result\":\"$db_result\",\"files_result\":\"$files_result\"}}"
+    if [[ -n "$webhook_token" ]]; then
+      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -H "Authorization: Bearer $webhook_token" -d "$json_payload" -o /dev/null --max-time 10 || true
+    else
+      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -d "$json_payload" -o /dev/null --max-time 10 || true
     fi
   fi
 

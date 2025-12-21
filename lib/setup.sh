@@ -589,5 +589,40 @@ EOF
   echo "View status anytime with: systemctl list-timers backupd-*"
   echo
 
+  # Send setup_complete notification (ntfy + webhook)
+  local ntfy_url ntfy_token webhook_url webhook_token
+  ntfy_url="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
+  ntfy_token="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
+  webhook_url="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
+  webhook_token="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
+
+  local hostname notification_title notification_body
+  hostname="$(hostname -f 2>/dev/null || hostname)"
+  notification_title="Backupd Setup Complete on $hostname"
+  notification_body="Backup management system configured successfully. Database: ${DO_DATABASE}, Files: ${DO_FILES}, Remote: ${RCLONE_REMOTE}, Retention: ${RETENTION_DESC}"
+
+  # Send ntfy notification
+  if [[ -n "$ntfy_url" ]]; then
+    if [[ -n "$ntfy_token" ]]; then
+      curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $notification_title" -H "Tags: white_check_mark" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    else
+      curl -s -H "Title: $notification_title" -H "Tags: white_check_mark" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
+    fi
+    print_info "Setup notification sent to ntfy"
+  fi
+
+  # Send webhook notification
+  if [[ -n "$webhook_url" ]]; then
+    local timestamp json_payload
+    timestamp="$(date -Iseconds)"
+    json_payload="{\"event\":\"setup_complete\",\"title\":\"$notification_title\",\"hostname\":\"$hostname\",\"message\":\"$notification_body\",\"timestamp\":\"$timestamp\",\"details\":{\"database\":\"$DO_DATABASE\",\"files\":\"$DO_FILES\",\"remote\":\"$RCLONE_REMOTE\",\"retention\":\"$RETENTION_DESC\"}}"
+    if [[ -n "$webhook_token" ]]; then
+      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -H "Authorization: Bearer $webhook_token" -d "$json_payload" -o /dev/null --max-time 10 || true
+    else
+      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -d "$json_payload" -o /dev/null --max-time 10 || true
+    fi
+    print_info "Setup notification sent to webhook"
+  fi
+
   press_enter_to_continue
 }

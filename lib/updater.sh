@@ -575,6 +575,7 @@ do_dev_update() {
     "lib/schedule.sh"
     "lib/setup.sh"
     "lib/updater.sh"
+    "lib/notifications.sh"
   )
 
   # Download main script

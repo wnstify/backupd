@@ -40,6 +40,7 @@ LIB_MODULES=(
     "schedule.sh"
     "setup.sh"
     "updater.sh"
+    "notifications.sh"
 )
 
 # Colors
@@ -437,6 +438,72 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+    # Verify backup service
+    cat > /etc/systemd/system/backupd-verify.service << 'EOF'
+[Unit]
+Description=Backupd - Backup Verification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/backupd/scripts/verify_backup.sh
+StandardOutput=append:/etc/backupd/logs/verify_logfile.log
+StandardError=append:/etc/backupd/logs/verify_logfile.log
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Verify backup timer (weekly on Sundays at 2am)
+    cat > /etc/systemd/system/backupd-verify.timer << 'EOF'
+[Unit]
+Description=Backupd - Backup Verification Timer
+Requires=backupd-verify.service
+
+[Timer]
+OnCalendar=Sun *-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # Full verify backup service (monthly full verification with download + decrypt test)
+    cat > /etc/systemd/system/backupd-verify-full.service << 'EOF'
+[Unit]
+Description=Backupd - Monthly Full Backup Verification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/backupd/scripts/verify_full_backup.sh
+StandardOutput=append:/etc/backupd/logs/verify_full_logfile.log
+StandardError=append:/etc/backupd/logs/verify_full_logfile.log
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Full verify backup timer (monthly on 1st at 3am)
+    cat > /etc/systemd/system/backupd-verify-full.timer << 'EOF'
+[Unit]
+Description=Backupd - Monthly Full Backup Verification Timer
+Requires=backupd-verify-full.service
+
+[Timer]
+OnCalendar=*-*-01 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
     # Reload systemd
     systemctl daemon-reload
 
@@ -474,6 +541,7 @@ uninstall() {
     systemctl stop backupd-db.timer 2>/dev/null || true
     systemctl stop backupd-files.timer 2>/dev/null || true
     systemctl stop backupd-verify.timer 2>/dev/null || true
+    systemctl stop backupd-verify-full.timer 2>/dev/null || true
 
     # Step 2: Stop any running services (wait for current backups to finish)
     echo -e "  Stopping services..."
@@ -486,20 +554,26 @@ uninstall() {
     if systemctl is-active --quiet backupd-verify.service 2>/dev/null; then
         echo -e "    Waiting for verification to complete..."
     fi
+    if systemctl is-active --quiet backupd-verify-full.service 2>/dev/null; then
+        echo -e "    Waiting for full verification to complete..."
+    fi
 
     # Stop services (will wait for them to finish since they're Type=oneshot)
     systemctl stop backupd-db.service 2>/dev/null || true
     systemctl stop backupd-files.service 2>/dev/null || true
     systemctl stop backupd-verify.service 2>/dev/null || true
+    systemctl stop backupd-verify-full.service 2>/dev/null || true
 
     # Step 3: Disable all units
     echo -e "  Disabling units..."
     systemctl disable backupd-db.timer 2>/dev/null || true
     systemctl disable backupd-files.timer 2>/dev/null || true
     systemctl disable backupd-verify.timer 2>/dev/null || true
+    systemctl disable backupd-verify-full.timer 2>/dev/null || true
     systemctl disable backupd-db.service 2>/dev/null || true
     systemctl disable backupd-files.service 2>/dev/null || true
     systemctl disable backupd-verify.service 2>/dev/null || true
+    systemctl disable backupd-verify-full.service 2>/dev/null || true
 
     # Step 4: Remove systemd units BEFORE removing scripts
     echo -e "  Removing systemd units..."
@@ -509,6 +583,8 @@ uninstall() {
     rm -f /etc/systemd/system/backupd-files.timer
     rm -f /etc/systemd/system/backupd-verify.service
     rm -f /etc/systemd/system/backupd-verify.timer
+    rm -f /etc/systemd/system/backupd-verify-full.service
+    rm -f /etc/systemd/system/backupd-verify-full.timer
     systemctl daemon-reload 2>/dev/null || true
 
     # Step 5: Remove symlink

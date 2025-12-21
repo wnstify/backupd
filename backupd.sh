@@ -59,6 +59,7 @@ source "$LIB_DIR/restore.sh"    # Restore execution
 source "$LIB_DIR/schedule.sh"   # Schedule management
 source "$LIB_DIR/setup.sh"      # Setup wizard
 source "$LIB_DIR/updater.sh"    # Auto-update functionality
+source "$LIB_DIR/notifications.sh" # Notification configuration
 
 # ---------- Install Command ----------
 
@@ -191,25 +192,29 @@ main_menu() {
       echo
       echo "  1. Run backup now"
       echo "  2. Restore from backup"
-      echo "  3. View status"
-      echo "  4. View logs"
-      echo "  5. Manage schedules"
-      echo "  6. Reconfigure"
-      echo "  7. Uninstall"
+      echo "  3. Verify backups"
+      echo "  4. View status"
+      echo "  5. View logs"
+      echo "  6. Manage schedules"
+      echo "  7. Notifications"
+      echo "  8. Reconfigure"
+      echo "  9. Uninstall"
       echo
       echo "  U. Update tool"
       echo "  0. Exit"
       echo
-      read -p "Select option [1-7, U, 0]: " choice
+      read -p "Select option [1-9, U, 0]: " choice
 
       case "$choice" in
         1) run_backup ;;
         2) run_restore ;;
-        3) show_status ;;
-        4) view_logs ;;
-        5) manage_schedules ;;
-        6) run_setup ;;
-        7) uninstall_tool ;;
+        3) verify_backup_integrity ;;
+        4) show_status ;;
+        5) view_logs ;;
+        6) manage_schedules ;;
+        7) manage_notifications ;;
+        8) run_setup ;;
+        9) uninstall_tool ;;
         [Uu]) do_update ;;
         0) exit 0 ;;
         *) print_error "Invalid option" ; sleep 1 ;;
@@ -378,31 +383,38 @@ do_migrate_encryption() {
 }
 
 regenerate_all_scripts() {
-  local secrets_dir rclone_remote rclone_path retention_days
+  local secrets_dir rclone_remote rclone_db_path rclone_files_path retention_minutes
   secrets_dir="$(get_secrets_dir)"
-  rclone_remote="$(get_config "RCLONE_REMOTE")"
-  rclone_path="$(get_config "RCLONE_PATH")"
-  retention_days="$(get_config "RETENTION_DAYS" "30")"
-
-  local retention_minutes=$((retention_days * 24 * 60))
+  rclone_remote="$(get_config_value "RCLONE_REMOTE")"
+  rclone_db_path="$(get_config_value "RCLONE_DB_PATH")"
+  rclone_files_path="$(get_config_value "RCLONE_FILES_PATH")"
+  retention_minutes="$(get_config_value "RETENTION_MINUTES")"
+  retention_minutes="${retention_minutes:-43200}"
 
   # Regenerate DB backup script if DB backup is enabled
-  if [[ "$(get_config "BACKUP_DB")" == "yes" ]]; then
-    generate_db_backup_script "$secrets_dir" "$rclone_remote" "${rclone_path}/databases" "$INSTALL_DIR/logs" "$retention_minutes"
-    generate_db_restore_script "$secrets_dir" "$rclone_remote" "${rclone_path}/databases"
+  local do_db
+  do_db="$(get_config_value "DO_DATABASE")"
+  if [[ "$do_db" == "true" ]]; then
+    generate_db_backup_script "$secrets_dir" "$rclone_remote" "$rclone_db_path" "$INSTALL_DIR/logs" "$retention_minutes"
+    generate_db_restore_script "$secrets_dir" "$rclone_remote" "$rclone_db_path"
   fi
 
   # Regenerate files backup script if files backup is enabled
-  if [[ "$(get_config "BACKUP_FILES")" == "yes" ]]; then
+  local do_files
+  do_files="$(get_config_value "DO_FILES")"
+  if [[ "$do_files" == "true" ]]; then
     local web_path_pattern webroot_subdir
-    web_path_pattern="$(get_config "WEB_PATH_PATTERN" "/var/www/*")"
-    webroot_subdir="$(get_config "WEBROOT_SUBDIR" ".")"
-    generate_files_backup_script "$secrets_dir" "$rclone_remote" "${rclone_path}/files" "$INSTALL_DIR/logs" "$retention_minutes" "$web_path_pattern" "$webroot_subdir"
-    generate_files_restore_script "$rclone_remote" "${rclone_path}/files"
+    web_path_pattern="$(get_config_value "WEB_PATH_PATTERN")"
+    web_path_pattern="${web_path_pattern:-/var/www/*}"
+    webroot_subdir="$(get_config_value "WEBROOT_SUBDIR")"
+    webroot_subdir="${webroot_subdir:-.}"
+    generate_files_backup_script "$secrets_dir" "$rclone_remote" "$rclone_files_path" "$INSTALL_DIR/logs" "$retention_minutes" "$web_path_pattern" "$webroot_subdir"
+    generate_files_restore_script "$rclone_remote" "$rclone_files_path"
   fi
 
-  # Regenerate verify script
-  generate_verify_script "$secrets_dir" "$rclone_remote" "$rclone_path"
+  # Regenerate verify scripts
+  generate_verify_script
+  generate_full_verify_script
 }
 
 parse_arguments() {

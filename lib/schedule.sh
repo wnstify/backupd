@@ -7,127 +7,129 @@
 # ---------- Manage Schedules ----------
 
 manage_schedules() {
-  print_header
-  echo "Manage Backup Schedules"
-  echo "======================="
-  echo
+  while true; do
+    print_header
+    echo "Manage Backup Schedules"
+    echo "======================="
+    echo
 
-  if ! is_configured; then
-    print_error "System not configured. Please run setup first."
-    press_enter_to_continue
-    return
-  fi
-
-  # Show current schedules
-  echo "Current Schedules:"
-  echo
-
-  # Check systemd timers first, fall back to cron
-  if systemctl is-enabled backupd-db.timer &>/dev/null; then
-    local db_schedule
-    db_schedule=$(systemctl show backupd-db.timer --property=TimersCalendar 2>/dev/null | cut -d'=' -f2)
-    if [[ -z "$db_schedule" ]]; then
-      db_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-db.timer 2>/dev/null | cut -d'=' -f2)
-    fi
-    print_success "Database (systemd): $db_schedule"
-  elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/db_backup.sh"; then
-    local db_schedule
-    db_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/db_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
-    print_success "Database (cron): $db_schedule"
-  else
-    print_warning "Database: NOT SCHEDULED"
-  fi
-
-  if systemctl is-enabled backupd-files.timer &>/dev/null; then
-    local files_schedule
-    files_schedule=$(systemctl show backupd-files.timer --property=TimersCalendar 2>/dev/null | cut -d'=' -f2)
-    if [[ -z "$files_schedule" ]]; then
-      files_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-files.timer 2>/dev/null | cut -d'=' -f2)
-    fi
-    print_success "Files (systemd): $files_schedule"
-  elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/files_backup.sh"; then
-    local files_schedule
-    files_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/files_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
-    print_success "Files (cron): $files_schedule"
-  else
-    print_warning "Files: NOT SCHEDULED"
-  fi
-
-  # Check quick integrity check timer
-  if systemctl is-enabled backupd-verify.timer &>/dev/null; then
-    local verify_schedule
-    verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify.timer 2>/dev/null | cut -d'=' -f2)
-    print_success "Quick integrity check (systemd): $verify_schedule"
-  else
-    print_warning "Quick integrity check: NOT SCHEDULED (optional)"
-  fi
-
-  # Check monthly full verification timer
-  if systemctl is-enabled backupd-verify-full.timer &>/dev/null; then
-    local full_verify_schedule
-    full_verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify-full.timer 2>/dev/null | cut -d'=' -f2)
-    print_success "Monthly full verification (systemd): $full_verify_schedule"
-  else
-    print_warning "Monthly full verification: DISABLED (recommended to enable)"
-  fi
-
-  # Show retention policy
-  echo
-  local retention_desc
-  retention_desc="$(get_config_value 'RETENTION_DESC')"
-  if [[ -n "$retention_desc" ]]; then
-    print_success "Retention policy: $retention_desc"
-  else
-    print_warning "Retention policy: NOT CONFIGURED"
-  fi
-
-  echo
-  echo "Options:"
-  echo "1. Set/change database backup schedule"
-  echo "2. Set/change files backup schedule"
-  echo "3. Disable database backup schedule"
-  echo "4. Disable files backup schedule"
-  echo "5. Change retention policy"
-  echo "6. Set/change quick integrity check schedule"
-  echo "7. Disable quick integrity check schedule"
-  echo "8. Enable/disable monthly full verification"
-  echo "9. View timer status"
-  echo "0. Back to main menu"
-  echo
-  read -p "Select option [0-9]: " schedule_choice
-
-  case "$schedule_choice" in
-    1)
-      set_systemd_schedule "db" "Database"
-      ;;
-    2)
-      set_systemd_schedule "files" "Files"
-      ;;
-    3)
-      disable_schedule "db" "Database"
-      ;;
-    4)
-      disable_schedule "files" "Files"
-      ;;
-    5)
-      change_retention_policy
-      ;;
-    6)
-      set_integrity_check_schedule
-      ;;
-    7)
-      disable_schedule "verify" "Quick integrity check"
-      ;;
-    8)
-      manage_full_verification_timer
-      ;;
-    9)
-      view_timer_status
-      ;;
-    0|*)
+    if ! is_configured; then
+      print_error "System not configured. Please run setup first."
+      press_enter_to_continue
       return
-      ;;
-  esac
+    fi
+
+    # Show current schedules
+    echo "Current Schedules:"
+    echo
+
+    # Check systemd timers first, fall back to cron
+    if systemctl is-enabled backupd-db.timer &>/dev/null; then
+      local db_schedule
+      db_schedule=$(systemctl show backupd-db.timer --property=TimersCalendar 2>/dev/null | cut -d'=' -f2)
+      if [[ -z "$db_schedule" ]]; then
+        db_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-db.timer 2>/dev/null | cut -d'=' -f2)
+      fi
+      print_success "Database (systemd): $db_schedule"
+    elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/db_backup.sh"; then
+      local db_schedule
+      db_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/db_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
+      print_success "Database (cron): $db_schedule"
+    else
+      print_warning "Database: NOT SCHEDULED"
+    fi
+
+    if systemctl is-enabled backupd-files.timer &>/dev/null; then
+      local files_schedule
+      files_schedule=$(systemctl show backupd-files.timer --property=TimersCalendar 2>/dev/null | cut -d'=' -f2)
+      if [[ -z "$files_schedule" ]]; then
+        files_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-files.timer 2>/dev/null | cut -d'=' -f2)
+      fi
+      print_success "Files (systemd): $files_schedule"
+    elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/files_backup.sh"; then
+      local files_schedule
+      files_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/files_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
+      print_success "Files (cron): $files_schedule"
+    else
+      print_warning "Files: NOT SCHEDULED"
+    fi
+
+    # Check quick integrity check timer
+    if systemctl is-enabled backupd-verify.timer &>/dev/null; then
+      local verify_schedule
+      verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify.timer 2>/dev/null | cut -d'=' -f2)
+      print_success "Quick integrity check (systemd): $verify_schedule"
+    else
+      print_warning "Quick integrity check: NOT SCHEDULED (optional)"
+    fi
+
+    # Check monthly full verification timer
+    if systemctl is-enabled backupd-verify-full.timer &>/dev/null; then
+      local full_verify_schedule
+      full_verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify-full.timer 2>/dev/null | cut -d'=' -f2)
+      print_success "Monthly full verification (systemd): $full_verify_schedule"
+    else
+      print_warning "Monthly full verification: DISABLED (recommended to enable)"
+    fi
+
+    # Show retention policy
+    echo
+    local retention_desc
+    retention_desc="$(get_config_value 'RETENTION_DESC')"
+    if [[ -n "$retention_desc" ]]; then
+      print_success "Retention policy: $retention_desc"
+    else
+      print_warning "Retention policy: NOT CONFIGURED"
+    fi
+
+    echo
+    echo "Options:"
+    echo "1. Set/change database backup schedule"
+    echo "2. Set/change files backup schedule"
+    echo "3. Disable database backup schedule"
+    echo "4. Disable files backup schedule"
+    echo "5. Change retention policy"
+    echo "6. Set/change quick integrity check schedule"
+    echo "7. Disable quick integrity check schedule"
+    echo "8. Enable/disable monthly full verification"
+    echo "9. View timer status"
+    echo "0. Back to main menu"
+    echo
+    read -p "Select option [0-9]: " schedule_choice
+
+    case "$schedule_choice" in
+      1)
+        set_systemd_schedule "db" "Database"
+        ;;
+      2)
+        set_systemd_schedule "files" "Files"
+        ;;
+      3)
+        disable_schedule "db" "Database"
+        ;;
+      4)
+        disable_schedule "files" "Files"
+        ;;
+      5)
+        change_retention_policy
+        ;;
+      6)
+        set_integrity_check_schedule
+        ;;
+      7)
+        disable_schedule "verify" "Quick integrity check"
+        ;;
+      8)
+        manage_full_verification_timer
+        ;;
+      9)
+        view_timer_status
+        ;;
+      0|*)
+        return
+        ;;
+    esac
+  done
 }
 
 change_retention_policy() {
