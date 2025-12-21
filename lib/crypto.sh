@@ -237,12 +237,15 @@ store_secret() {
   iterations="$(get_pbkdf2_iterations "$version")"
   key="$(derive_key "$secrets_dir")" || return 1
 
+  # Unlock directory and file for writing
+  chattr -i "$secrets_dir" 2>/dev/null || true
   chattr -i "$secrets_dir/$secret_name" 2>/dev/null || true
 
   printf '%s' "$secret_value" | openssl enc -aes-256-cbc -pbkdf2 -iter "$iterations" -salt -pass "pass:$key" -base64 > "$secrets_dir/$secret_name"
 
   chmod 600 "$secrets_dir/$secret_name"
   chattr +i "$secrets_dir/$secret_name" 2>/dev/null || true
+  chattr +i "$secrets_dir" 2>/dev/null || true
 }
 
 get_secret() {
@@ -307,7 +310,7 @@ secret_exists() {
 
 lock_secrets() {
   local secrets_dir="$1"
-  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".algo")
+  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".algo")
   for f in "${secret_files[@]}"; do
     [[ -f "$secrets_dir/$f" ]] && chattr +i "$secrets_dir/$f" 2>/dev/null || true
   done
@@ -317,7 +320,7 @@ lock_secrets() {
 unlock_secrets() {
   local secrets_dir="$1"
   chattr -i "$secrets_dir" 2>/dev/null || true
-  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".algo")
+  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".algo")
   for f in "${secret_files[@]}"; do
     [[ -f "$secrets_dir/$f" ]] && chattr -i "$secrets_dir/$f" 2>/dev/null || true
   done
@@ -330,7 +333,7 @@ migrate_secrets() {
   local secrets_dir="$1"
   local from_version="$2"
   local to_version="$3"
-  local secret_files=(".c1" ".c2" ".c3" ".c4" ".c5")
+  local secret_files=(".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7")
   local secrets_data=()
   local failed=0
 
