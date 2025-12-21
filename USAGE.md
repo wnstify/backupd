@@ -117,16 +117,18 @@ Main Menu
 
   1. Run backup now
   2. Restore from backup
-  3. View status
-  4. View logs
-  5. Manage schedules
-  6. Reconfigure
-  7. Uninstall
+  3. Verify backups
+  4. View status
+  5. View logs
+  6. Manage schedules
+  7. Notifications
+  8. Reconfigure
+  9. Uninstall
 
   U. Update tool
   0. Exit
 
-Select option [1-7, U, 0]:
+Select option [1-9, U, 0]:
 ```
 
 ### Menu Options
@@ -135,11 +137,13 @@ Select option [1-7, U, 0]:
 |--------|-------------|
 | **1. Run backup now** | Manually trigger database and/or file backups |
 | **2. Restore from backup** | Restore databases or files from existing backups |
-| **3. View status** | Display current configuration and system status |
-| **4. View logs** | View backup logs for troubleshooting |
-| **5. Manage schedules** | Add, modify, or disable backup schedules |
-| **6. Reconfigure** | Run the setup wizard again |
-| **7. Uninstall** | Remove the tool completely |
+| **3. Verify backups** | Run integrity checks on remote backups |
+| **4. View status** | Display current configuration and system status |
+| **5. View logs** | View backup, verification, and notification logs |
+| **6. Manage schedules** | Add, modify, or disable backup schedules |
+| **7. Notifications** | Configure ntfy, webhook, test, view failures |
+| **8. Reconfigure** | Run the setup wizard again |
+| **9. Uninstall** | Remove the tool completely |
 | **U. Update tool** | Check for and install updates from GitHub |
 | **0. Exit** | Exit the application |
 

@@ -124,7 +124,8 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 │   ├── restore.sh            # Restore execution
 │   ├── schedule.sh           # Schedule management
 │   ├── setup.sh              # Setup wizard
-│   └── updater.sh            # Auto-update functionality
+│   ├── updater.sh            # Auto-update functionality
+│   └── notifications.sh      # Notification configuration
 ├── .config                   # Configuration (retention, paths, etc.)
 ├── scripts/
 │   ├── db_backup.sh          # Database backup script
@@ -134,9 +135,10 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 │   ├── verify_backup.sh      # Quick integrity check (weekly)
 │   └── verify_reminder.sh    # Full test reminder (monthly)
 └── logs/
-    ├── db_logfile.log        # Database backup logs (auto-rotated)
-    ├── files_logfile.log     # Files backup logs (auto-rotated)
-    └── verify_logfile.log    # Verification logs (auto-rotated)
+    ├── db_logfile.log            # Database backup logs (auto-rotated)
+    ├── files_logfile.log         # Files backup logs (auto-rotated)
+    ├── verify_logfile.log        # Verification logs (auto-rotated)
+    └── notification_failures.log # Failed notification attempts
 
 /etc/.{random}/               # Encrypted secrets (hidden, immutable)
 ├── .s                        # Salt for key derivation
@@ -183,11 +185,13 @@ Main Menu
 
   1. Run backup now
   2. Restore from backup
-  3. View status
-  4. View logs
-  5. Manage schedules
-  6. Reconfigure
-  7. Uninstall
+  3. Verify backups
+  4. View status
+  5. View logs
+  6. Manage schedules
+  7. Notifications
+  8. Reconfigure
+  9. Uninstall
 
   U. Update tool
   0. Exit
@@ -455,19 +459,41 @@ This is standard behavior for database backup tools — they backup data, not My
 
 ## Notifications
 
-Optional push notifications via [ntfy.sh](https://ntfy.sh) and/or custom webhooks:
+Optional push notifications via [ntfy.sh](https://ntfy.sh) and/or custom webhooks. Both channels can be used simultaneously for redundancy.
+
+### Managing Notifications
+
+Access the dedicated Notifications menu from the main menu (option 7):
+
+```
+Notifications
+=============
+
+Current Configuration:
+  ✓ ntfy: https://ntfy.sh/your-topic...
+  ✓ Webhook: https://your-webhook.com/...
+
+Options:
+1. Configure ntfy
+2. Configure webhook
+3. Test notifications
+4. View notification failures
+5. Disable all notifications
+0. Back to main menu
+```
 
 ### ntfy.sh (Push Notifications)
-1. Install ntfy app on your phone
-2. Subscribe to a topic (e.g., `myserver-backups`)
-3. Configure in backupd settings
+1. Install ntfy app on your phone ([iOS](https://apps.apple.com/app/ntfy/id1625396347) / [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy))
+2. Subscribe to a unique topic (e.g., `myserver-backups-secret123`)
+3. Configure in backupd: Main Menu → Notifications → Configure ntfy
 4. Receive alerts on backup success/failure
 
 ### Webhooks (Custom Integrations)
-Send backup events to any webhook endpoint (Slack, Discord, custom APIs):
-1. Configure your webhook URL during setup
-2. Optionally add a Bearer token for authentication
-3. Receive JSON payloads with event details
+Send backup events to any webhook endpoint (n8n, Slack, Discord, custom APIs):
+1. Main Menu → Notifications → Configure webhook
+2. Enter your webhook URL (HTTPS required)
+3. Optionally add a Bearer token for authentication (most webhooks don't need this)
+4. Receive JSON payloads with event details
 
 **Webhook JSON payload:**
 ```json
@@ -481,7 +507,28 @@ Send backup events to any webhook endpoint (Slack, Discord, custom APIs):
 }
 ```
 
-**Security:** All notification URLs must use HTTPS (enforced).
+### Notification Events (23+ types)
+
+| Category | Events |
+|----------|--------|
+| **DB Backup** | started, complete, warning, failed, retention_cleanup, retention_failed |
+| **Files Backup** | started, complete, warning, failed, retention_cleanup, retention_failed |
+| **Verification** | passed, warning, failed, needs_full, never_tested, overdue |
+| **System** | setup_complete, test |
+
+### Reliability Features
+
+- **Dual-channel delivery** — Both ntfy and webhook can be configured for redundancy
+- **Retry with backoff** — Failed sends retry 3 times with exponential backoff (1s, 2s, 4s)
+- **Failure logging** — All failed notifications logged to `logs/notification_failures.log`
+- **HTTP validation** — Only 2xx responses count as success (not just "no error")
+- **Test function** — Send test notifications to verify configuration
+
+### Security
+
+- All notification URLs must use HTTPS (enforced)
+- Webhook tokens are encrypted with AES-256 (same as database credentials)
+- No sensitive data (passwords, paths) included in notifications
 
 **Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without notifications configured.
 

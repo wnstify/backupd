@@ -7,23 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.2.0] - 2025-12-20
+## [2.2.0] - 2025-12-21
 
 ### Added
 
+- **Dedicated Notifications Menu** - New main menu option (7. Notifications)
+  - Configure ntfy URL and token
+  - Configure webhook URL and Bearer token
+  - Test notifications (sends to all configured channels)
+  - View notification failure log
+  - Disable all notifications with one action
+  - `lib/notifications.sh` - New 478-line module for notification management
+
 - **Webhook Notifications** - Dual-channel notification system
-  - Send backup events to any webhook endpoint (Slack, Discord, custom APIs)
+  - Send backup events to any webhook endpoint (n8n, Slack, Discord, custom APIs)
   - JSON payload with event, title, hostname, message, timestamp, and details
   - Optional Bearer token authentication for secure endpoints
   - Works alongside or independently of ntfy notifications
-  - Configure during setup wizard or reconfiguration
+  - Configure from dedicated Notifications menu
 
 - **Robust Notification Failure Handling**
-  - 3-attempt retry with exponential backoff (2s, 4s, 8s delays)
+  - 3-attempt retry with exponential backoff (1s, 2s, 4s delays)
   - HTTP status code validation (only 2xx = success)
   - Dedicated failure log: `/etc/backupd/logs/notification_failures.log`
   - CRITICAL alert when both ntfy AND webhook channels fail
   - Prevents silent notification failures that could hide backup problems
+
+- **Enhanced View Logs Menu**
+  - Shows 4 log types with file sizes
+  - Database backup log
+  - Files backup log
+  - Verification log
+  - Notification failures (with entry count, highlighted if non-zero)
+  - View all logs directory
+  - Clear old logs option (truncates logs > 10MB)
+
+- **Files Restore Shows 3 Backups**
+  - Now displays last 3 backups per site (not just latest)
+  - Easier to select older restore point
+  - Added "Press Enter to continue" after restore completes
 
 - **Monthly Full Verification Timer**
   - New systemd timer: `backupd-verify-full.timer`
@@ -36,11 +58,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Menu Structure Overhaul**
+  - Verify backups moved to main menu (option 3) - no longer buried
+  - Notifications added as main menu option (7)
+  - Renumbered: Reconfigure (8), Uninstall (9)
+  - All submenus now use `0` for back (standardized)
+  - Schedule menu now loops properly after actions
+
 - **HTTPS Enforcement** (Breaking Change for HTTP users)
   - All notification URLs (ntfy AND webhook) now require HTTPS
   - HTTP URLs are rejected with clear error message
   - Security best practice - no exceptions
   - Helpful guidance shown when HTTP URL entered
+
+- **Clearer Token Prompt**
+  - Webhook token prompt now says "most webhooks don't need this"
+  - Reduces confusion for users without authentication requirements
 
 - **Enhanced Reconfigure Warning**
   - Explicit warning about backup unrecoverability when changing encryption password
@@ -50,29 +83,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Secrets Directory Locking** - Added `.c6` and `.c7` to lock/unlock/migrate functions
+  - Fixes "Operation not permitted" error when saving webhook secrets
+  - `store_secret()` now unlocks directory before creating new files
 - **Webhook JSON Payload** - Added missing `title` field to webhook notifications
 - **JSON Default Value** - Fixed bash syntax error `\{\}` → `${4:-"{}"}` in notification function
 - **Files Backup Warning** - Fixed undefined `$WWW_DIR` variable, now uses `$WEB_PATH_PATTERN`
 - **Verify Hostname** - Fixed wrong variable `$HOSTNAME` → `$hostname_full` in failure notifications
 - **Script Regeneration** - Fixed `get_config()` → `get_config_value()` function calls
 - **Config Key Mismatch** - Fixed `BACKUP_DB` → `DO_DATABASE` config key references
+- **Install Script** - Added `notifications.sh` to module download list
+- **Updater** - Added `notifications.sh` to dev-update file list
 
 ### Security
 
 - **HTTPS-only notifications** - Enforced for all notification channels
+- Webhook tokens encrypted with AES-256 (same as database credentials)
 - Prevents credential leakage over unencrypted connections
 - Clear error messages guide users to secure configuration
 
 ### Technical
 
 - New encrypted secrets: `.c6` (webhook URL), `.c7` (webhook auth token)
+- New module: `lib/notifications.sh` (notification configuration UI)
 - Updated `send_notification_all()` function for dual-channel delivery
 - All 23 notification event types tested and validated (8 success, 8 warning, 7 failure)
 - All scripts pass bash syntax validation
 - `lib/verify.sh` - Added webhook support alongside ntfy
 - `lib/setup.sh` - Added setup_complete notification at end of wizard
 - `lib/generators.sh` - Added retry logic and failure logging to all 4 backup templates
-- `install.sh` - Added backupd-verify-full.service and .timer
+- `lib/crypto.sh` - Added `.c6`, `.c7` to lock_secrets(), unlock_secrets(), migrate_secrets()
+- `install.sh` - Added backupd-verify-full.service and .timer, notifications.sh module
 
 ---
 
