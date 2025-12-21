@@ -1211,11 +1211,13 @@ echo "$LOG_PREFIX Fetching backups from $RCLONE_REMOTE:$RCLONE_PATH..."
 
 # Get unique site names from backups (each site has its own archive)
 declare -A SITE_BACKUPS=()
+declare -A SITE_BACKUP_LIST=()
 declare -a SITE_NAMES=()
 
 remote_files="$(rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r)" || true
 
 # Group backups by site name (format: sitename-YYYY-MM-DD-HHMM.tar.gz)
+# Store up to 3 most recent backups per site
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   # Extract site name (everything before the timestamp)
@@ -1224,6 +1226,13 @@ while IFS= read -r f; do
     if [[ -z "${SITE_BACKUPS[$site_name]:-}" ]]; then
       SITE_NAMES+=("$site_name")
       SITE_BACKUPS[$site_name]="$f"  # Store most recent (already sorted)
+      SITE_BACKUP_LIST[$site_name]="$f"
+    else
+      # Add to list if we have less than 3 backups for this site
+      backup_count=$(echo "${SITE_BACKUP_LIST[$site_name]}" | tr '|' '\n' | wc -l)
+      if [[ $backup_count -lt 3 ]]; then
+        SITE_BACKUP_LIST[$site_name]="${SITE_BACKUP_LIST[$site_name]}|$f"
+      fi
     fi
   fi
 done <<< "$remote_files"
@@ -1235,9 +1244,16 @@ echo
 echo "Available sites:"
 for i in "${!SITE_NAMES[@]}"; do
   site="${SITE_NAMES[$i]}"
-  latest="${SITE_BACKUPS[$site]}"
   printf "  %2d) %s\n" "$((i+1))" "$site"
-  printf "      Latest: %s\n" "$latest"
+  # Show up to 3 recent backups
+  IFS='|' read -ra backups <<< "${SITE_BACKUP_LIST[$site]}"
+  for j in "${!backups[@]}"; do
+    if [[ $j -eq 0 ]]; then
+      printf "      Latest: %s\n" "${backups[$j]}"
+    else
+      printf "             %s\n" "${backups[$j]}"
+    fi
+  done
 done
 echo
 echo "  A) Restore all sites (latest backup of each)"
@@ -1449,6 +1465,8 @@ echo
 echo "========================================================"
 echo "           Restore Complete!"
 echo "========================================================"
+echo
+read -p "Press Enter to continue..." _
 FILESRESTOREEOF
 
   sed -i \

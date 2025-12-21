@@ -211,7 +211,7 @@ configure_webhook() {
   fi
 
   echo
-  read -p "Configure/update Bearer token? (y/N): " update_token
+  read -p "Configure Bearer token? (most webhooks don't need this) (y/N): " update_token
   if [[ "$update_token" =~ ^[Yy]$ ]]; then
     read -sp "Enter Bearer token (or press Enter to remove): " new_token
     echo
