@@ -141,35 +141,148 @@ show_status() {
 # ---------- View Logs ----------
 
 view_logs() {
-  print_header
-  echo "View Logs"
-  echo "========="
-  echo
-  echo "1. Database backup log"
-  echo "2. Files backup log"
-  echo "3. Back to main menu"
-  echo
-  read -p "Select option [1-3]: " log_choice
+  while true; do
+    print_header
+    echo "View Logs"
+    echo "========="
+    echo
 
-  case "$log_choice" in
-    1)
-      if [[ -f "$INSTALL_DIR/logs/db_logfile.log" ]]; then
-        less "$INSTALL_DIR/logs/db_logfile.log"
+    # Show log sizes
+    local log_dir="$INSTALL_DIR/logs"
+    echo "Available Logs:"
+    echo
+
+    if [[ -f "$log_dir/db_logfile.log" ]]; then
+      local db_size
+      db_size=$(du -h "$log_dir/db_logfile.log" 2>/dev/null | cut -f1)
+      echo "  1. Database backup log ($db_size)"
+    else
+      echo -e "  1. Database backup log ${YELLOW}(not found)${NC}"
+    fi
+
+    if [[ -f "$log_dir/files_logfile.log" ]]; then
+      local files_size
+      files_size=$(du -h "$log_dir/files_logfile.log" 2>/dev/null | cut -f1)
+      echo "  2. Files backup log ($files_size)"
+    else
+      echo -e "  2. Files backup log ${YELLOW}(not found)${NC}"
+    fi
+
+    if [[ -f "$log_dir/verify_logfile.log" ]]; then
+      local verify_size
+      verify_size=$(du -h "$log_dir/verify_logfile.log" 2>/dev/null | cut -f1)
+      echo "  3. Verification log ($verify_size)"
+    else
+      echo -e "  3. Verification log ${YELLOW}(not found)${NC}"
+    fi
+
+    if [[ -f "$log_dir/notification_failures.log" ]]; then
+      local notif_size notif_count
+      notif_size=$(du -h "$log_dir/notification_failures.log" 2>/dev/null | cut -f1)
+      notif_count=$(wc -l < "$log_dir/notification_failures.log" 2>/dev/null || echo "0")
+      if [[ "$notif_count" -gt 0 ]]; then
+        echo -e "  4. Notification failures ${RED}($notif_count entries, $notif_size)${NC}"
       else
-        print_error "No database backup log found."
-        press_enter_to_continue
+        echo "  4. Notification failures (empty)"
       fi
-      ;;
-    2)
-      if [[ -f "$INSTALL_DIR/logs/files_logfile.log" ]]; then
-        less "$INSTALL_DIR/logs/files_logfile.log"
-      else
-        print_error "No files backup log found."
+    else
+      echo -e "  4. Notification failures ${YELLOW}(not found)${NC}"
+    fi
+
+    echo
+    echo "  5. View all logs directory"
+    echo "  6. Clear old logs"
+    echo "  0. Back to main menu"
+    echo
+    read -p "Select option [0-6]: " log_choice
+
+    case "$log_choice" in
+      1)
+        if [[ -f "$log_dir/db_logfile.log" ]]; then
+          less "$log_dir/db_logfile.log"
+        else
+          print_error "No database backup log found."
+          press_enter_to_continue
+        fi
+        ;;
+      2)
+        if [[ -f "$log_dir/files_logfile.log" ]]; then
+          less "$log_dir/files_logfile.log"
+        else
+          print_error "No files backup log found."
+          press_enter_to_continue
+        fi
+        ;;
+      3)
+        if [[ -f "$log_dir/verify_logfile.log" ]]; then
+          less "$log_dir/verify_logfile.log"
+        else
+          print_error "No verification log found."
+          press_enter_to_continue
+        fi
+        ;;
+      4)
+        if [[ -f "$log_dir/notification_failures.log" ]]; then
+          less "$log_dir/notification_failures.log"
+        else
+          print_error "No notification failure log found."
+          press_enter_to_continue
+        fi
+        ;;
+      5)
+        echo
+        echo "Log directory: $log_dir"
+        echo
+        ls -lah "$log_dir" 2>/dev/null || echo "No logs directory found."
         press_enter_to_continue
-      fi
-      ;;
-    3|*)
-      return
-      ;;
-  esac
+        ;;
+      6)
+        clear_old_logs
+        ;;
+      0|*)
+        return
+        ;;
+    esac
+  done
+}
+
+# ---------- Clear Old Logs ----------
+
+clear_old_logs() {
+  echo
+  echo "Clear Old Logs"
+  echo "=============="
+  echo
+  echo "This will clear log files older than 30 days."
+  echo
+  read -p "Continue? (y/N): " confirm
+
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Cancelled."
+    press_enter_to_continue
+    return
+  fi
+
+  local log_dir="$INSTALL_DIR/logs"
+  local cleared=0
+
+  # Truncate logs if they're too large (> 10MB)
+  for log_file in "$log_dir"/*.log; do
+    [[ -f "$log_file" ]] || continue
+    local size_bytes
+    size_bytes=$(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file" 2>/dev/null || echo "0")
+    if [[ "$size_bytes" -gt 10485760 ]]; then  # 10MB
+      echo "Truncating large log: $(basename "$log_file") ($(numfmt --to=iec-i "$size_bytes" 2>/dev/null || echo "${size_bytes}B"))"
+      # Keep last 1000 lines
+      tail -1000 "$log_file" > "${log_file}.tmp" && mv "${log_file}.tmp" "$log_file"
+      ((cleared++)) || true
+    fi
+  done
+
+  if [[ $cleared -gt 0 ]]; then
+    print_success "Cleared $cleared log file(s)."
+  else
+    print_info "No logs needed clearing."
+  fi
+  press_enter_to_continue
 }

@@ -22,10 +22,9 @@ run_backup() {
   echo "2. Run files backup"
   echo "3. Run both (database + files)"
   echo "4. Run cleanup now (remove old backups)"
-  echo "5. Verify backup integrity"
-  echo "6. Back to main menu"
+  echo "0. Back to main menu"
   echo
-  read -p "Select option [1-6]: " backup_choice
+  read -p "Select option [0-4]: " backup_choice
 
   case "$backup_choice" in
     1)
@@ -75,10 +74,7 @@ run_backup() {
     4)
       run_cleanup_now
       ;;
-    5)
-      verify_backup_integrity
-      ;;
-    6|*)
+    0|*)
       return
       ;;
   esac

@@ -59,6 +59,7 @@ source "$LIB_DIR/restore.sh"    # Restore execution
 source "$LIB_DIR/schedule.sh"   # Schedule management
 source "$LIB_DIR/setup.sh"      # Setup wizard
 source "$LIB_DIR/updater.sh"    # Auto-update functionality
+source "$LIB_DIR/notifications.sh" # Notification configuration
 
 # ---------- Install Command ----------
 
@@ -191,25 +192,29 @@ main_menu() {
       echo
       echo "  1. Run backup now"
       echo "  2. Restore from backup"
-      echo "  3. View status"
-      echo "  4. View logs"
-      echo "  5. Manage schedules"
-      echo "  6. Reconfigure"
-      echo "  7. Uninstall"
+      echo "  3. Verify backups"
+      echo "  4. View status"
+      echo "  5. View logs"
+      echo "  6. Manage schedules"
+      echo "  7. Notifications"
+      echo "  8. Reconfigure"
+      echo "  9. Uninstall"
       echo
       echo "  U. Update tool"
       echo "  0. Exit"
       echo
-      read -p "Select option [1-7, U, 0]: " choice
+      read -p "Select option [1-9, U, 0]: " choice
 
       case "$choice" in
         1) run_backup ;;
         2) run_restore ;;
-        3) show_status ;;
-        4) view_logs ;;
-        5) manage_schedules ;;
-        6) run_setup ;;
-        7) uninstall_tool ;;
+        3) verify_backup_integrity ;;
+        4) show_status ;;
+        5) view_logs ;;
+        6) manage_schedules ;;
+        7) manage_notifications ;;
+        8) run_setup ;;
+        9) uninstall_tool ;;
         [Uu]) do_update ;;
         0) exit 0 ;;
         *) print_error "Invalid option" ; sleep 1 ;;

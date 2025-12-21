@@ -15,6 +15,8 @@ SECRET_DB_USER=".c2"
 SECRET_DB_PASS=".c3"
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
+SECRET_WEBHOOK_URL=".c6"
+SECRET_WEBHOOK_TOKEN=".c7"
 
 # ---------- Encryption Constants ----------
 
