@@ -18,11 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Now shows extraction errors instead of hiding them
   - Shows "Success (X items extracted)" or specific error message
 
+- **SIGPIPE Crash (Exit 141)** - Fixed critical bug causing restore script to crash silently
+  - Root cause: `tar -tf | head` with `set -o pipefail` causes SIGPIPE when head closes the pipe
+  - This killed the script mid-restore with exit code 141 (128 + SIGPIPE)
+  - Fix: Changed to `2>/dev/null | head ... || true` to prevent pipeline failure
+
+- **Wrong File Ownership After Restore** - Fixed incorrect group ownership on restored files
+  - Previous behavior: Applied directory's group (`user:www-data`) to all files
+  - Correct behavior: Files get `user:user`, directory keeps `user:www-data`
+  - Root cause: `chown -R "$dir_owner"` used directory's group for all contents
+  - Fix: Use `find ... -exec chown "$dir_user:$dir_user"` for contents only
+  - This preserves web server access to the directory while maintaining correct file ownership
+
 ### Changed
 
 - **Extraction now uses pigz** - If pigz is available, uses it for decompression (matches backup)
 - **Added `-p` flag** - Preserves permissions during extraction (`tar -xpf`)
 - **Extraction verification** - Counts extracted files and fails if zero items extracted
+- **Ownership handling** - Contents get `user:user`, directory preserves `user:www-data` for web access
 
 ---
 

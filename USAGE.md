@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v2.2.0** by Backupd.
+Complete usage documentation for **Backupd v2.2.5** by Backupd.
 
 ## Table of Contents
 
