@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.5] - 2025-12-22
+
+### Fixed
+
+- **Restore Extraction Failure** - Fixed critical bug where files were not being extracted to website root
+  - Root cause: `2>/dev/null` was hiding all tar errors, making failures silent
+  - Backup uses `pigz` compression, but restore was using `gzip` - now uses pigz if available
+  - Added verification that files were actually extracted (counts items after extraction)
+  - Now shows extraction errors instead of hiding them
+  - Shows "Success (X items extracted)" or specific error message
+
+### Changed
+
+- **Extraction now uses pigz** - If pigz is available, uses it for decompression (matches backup)
+- **Added `-p` flag** - Preserves permissions during extraction (`tar -xpf`)
+- **Extraction verification** - Counts extracted files and fails if zero items extracted
+
+---
+
 ## [2.2.4] - 2025-12-22
 
 ### Fixed

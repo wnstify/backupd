@@ -1465,8 +1465,26 @@ for site in "${SELECTED_SITES[@]}"; do
     echo "$LOG_PREFIX   Clearing existing contents..."
     find "$restore_path" -mindepth 1 -delete 2>/dev/null || rm -rf "$restore_path"/* "$restore_path"/.[!.]* 2>/dev/null
 
-    if tar -xzf "$local_file" -C "$restore_path" 2>/dev/null; then
-      echo "$LOG_PREFIX   Success"
+    # Extract archive - use pigz if available (matches backup compression)
+    echo "$LOG_PREFIX   Extracting archive..."
+    extract_error=""
+    if command -v pigz >/dev/null 2>&1; then
+      # Use pigz for decompression (same as backup)
+      if ! tar -I pigz -xpf "$local_file" -C "$restore_path" 2>&1; then
+        extract_error="tar with pigz failed"
+      fi
+    else
+      # Fall back to gzip
+      if ! tar -xzpf "$local_file" -C "$restore_path" 2>&1; then
+        extract_error="tar with gzip failed"
+      fi
+    fi
+
+    # Verify extraction actually produced files
+    file_count=$(find "$restore_path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
+
+    if [[ -z "$extract_error" && $file_count -gt 0 ]]; then
+      echo "$LOG_PREFIX   Success ($file_count items extracted)"
       # Fix ownership - set to directory owner
       dir_owner=$(stat -c '%U:%G' "$restore_path" 2>/dev/null || echo "www-data:www-data")
       chown -R "$dir_owner" "$restore_path" 2>/dev/null || true
@@ -1475,7 +1493,12 @@ for site in "${SELECTED_SITES[@]}"; do
       [[ -n "$backup_name" && -d "$backup_name" ]] && rm -rf "$backup_name" || true
       RESTORED_SITES+=("$site")
     else
-      echo "$LOG_PREFIX   [ERROR] Extraction failed"
+      if [[ -n "$extract_error" ]]; then
+        echo "$LOG_PREFIX   [ERROR] $extract_error"
+      elif [[ $file_count -eq 0 ]]; then
+        echo "$LOG_PREFIX   [ERROR] Extraction produced no files!"
+        echo "$LOG_PREFIX   Archive may be empty or corrupted"
+      fi
       # Restore backup if we made one
       if [[ -n "$backup_name" && -d "$backup_name" ]]; then
         rm -rf "$restore_path"/* "$restore_path"/.[!.]* 2>/dev/null
@@ -1499,13 +1522,32 @@ for site in "${SELECTED_SITES[@]}"; do
       mv "$restore_path" "$extract_base_path/$backup_name"
     fi
 
-    if tar -xzf "$local_file" -C "$extract_base_path" 2>/dev/null; then
-      echo "$LOG_PREFIX   Success"
+    # Extract archive - use pigz if available (matches backup compression)
+    echo "$LOG_PREFIX   Extracting archive..."
+    extract_error=""
+    if command -v pigz >/dev/null 2>&1; then
+      if ! tar -I pigz -xpf "$local_file" -C "$extract_base_path" 2>&1; then
+        extract_error="tar with pigz failed"
+      fi
+    else
+      if ! tar -xzpf "$local_file" -C "$extract_base_path" 2>&1; then
+        extract_error="tar with gzip failed"
+      fi
+    fi
+
+    # Verify extraction actually produced the directory
+    if [[ -z "$extract_error" && -d "$restore_path" ]]; then
+      file_count=$(find "$restore_path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
+      echo "$LOG_PREFIX   Success ($file_count items in restored directory)"
       # Remove temp backup on success
       [[ -n "$backup_name" && -d "$extract_base_path/$backup_name" ]] && rm -rf "$extract_base_path/$backup_name" || true
       RESTORED_SITES+=("$site")
     else
-      echo "$LOG_PREFIX   [ERROR] Extraction failed"
+      if [[ -n "$extract_error" ]]; then
+        echo "$LOG_PREFIX   [ERROR] $extract_error"
+      elif [[ ! -d "$restore_path" ]]; then
+        echo "$LOG_PREFIX   [ERROR] Expected directory not created: $restore_path"
+      fi
       # Restore the backup if we made one
       if [[ -n "$backup_name" && -d "$extract_base_path/$backup_name" ]]; then
         mv "$extract_base_path/$backup_name" "$restore_path"
