@@ -1214,6 +1214,11 @@ declare -A SITE_BACKUPS=()
 declare -A SITE_BACKUP_LIST=()
 declare -a SITE_NAMES=()
 
+# Restore tracking
+declare -a RESTORED_SITES=()
+declare -a FAILED_SITES=()
+declare -a SKIPPED_SITES=()
+
 remote_files="$(rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r)" || true
 
 # Group backups by site name (format: sitename-YYYY-MM-DD-HHMM.tar.gz)
@@ -1288,6 +1293,46 @@ echo
 read -p "This will OVERWRITE existing sites. Continue? (yes/no): " confirm
 [[ ! "$confirm" =~ ^[Yy][Ee][Ss]$ ]] && exit 0
 
+# Pre-flight check: identify sites missing restore-path metadata
+echo
+echo "Step 2b: Pre-flight Check"
+echo "-------------------------"
+echo "$LOG_PREFIX Checking restore path metadata for selected sites..."
+
+declare -a SITES_NEED_PATH=()
+declare -A SITE_RESTORE_PATHS=()
+
+for site in "${SELECTED_SITES[@]}"; do
+  restore_path_file="${site}.restore-path"
+  if rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH/$restore_path_file" &>/dev/null; then
+    # Metadata exists - fetch it
+    if rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$restore_path_file" "$TEMP_DIR/" 2>/dev/null; then
+      SITE_RESTORE_PATHS[$site]=$(cat "$TEMP_DIR/$restore_path_file" 2>/dev/null)
+      rm -f "$TEMP_DIR/$restore_path_file"
+      echo "$LOG_PREFIX   $site: OK (path: ${SITE_RESTORE_PATHS[$site]})"
+    else
+      SITES_NEED_PATH+=("$site")
+      echo "$LOG_PREFIX   $site: NEEDS MANUAL PATH (fetch failed)"
+    fi
+  else
+    SITES_NEED_PATH+=("$site")
+    echo "$LOG_PREFIX   $site: NEEDS MANUAL PATH (no metadata)"
+  fi
+done
+
+# If any sites need manual paths, ask upfront
+if [[ ${#SITES_NEED_PATH[@]} -gt 0 ]]; then
+  echo
+  echo "$LOG_PREFIX ${#SITES_NEED_PATH[@]} site(s) require manual restore path entry."
+  echo "$LOG_PREFIX You will be prompted for each during restore."
+  echo
+  read -p "Continue with restore? (y/N): " continue_restore
+  if [[ ! "$continue_restore" =~ ^[Yy]$ ]]; then
+    echo "$LOG_PREFIX Restore cancelled."
+    exit 0
+  fi
+fi
+
 echo
 echo "Step 3: Restoring Sites"
 echo "-----------------------"
@@ -1302,6 +1347,7 @@ for site in "${SELECTED_SITES[@]}"; do
   echo "$LOG_PREFIX   Downloading..."
   if ! rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$backup_file" "$TEMP_DIR/" --progress; then
     echo "$LOG_PREFIX   [ERROR] Download failed"
+    FAILED_SITES+=("$site:download_failed")
     continue
   fi
 
@@ -1322,6 +1368,7 @@ for site in "${SELECTED_SITES[@]}"; do
       read -p "  Continue with this backup anyway? (y/N): " continue_anyway
       if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
         rm -f "$local_file" "$TEMP_DIR/$checksum_file"
+        SKIPPED_SITES+=("$site:checksum_mismatch")
         continue
       fi
     fi
@@ -1330,12 +1377,9 @@ for site in "${SELECTED_SITES[@]}"; do
     echo "$LOG_PREFIX   [INFO] No checksum file found"
   fi
 
-  # Download restore-path metadata file to determine where to extract
-  restore_path_file="${site}.restore-path"
-  restore_path=""
-  if rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$restore_path_file" "$TEMP_DIR/" 2>/dev/null; then
-    restore_path=$(cat "$TEMP_DIR/$restore_path_file" 2>/dev/null)
-    rm -f "$TEMP_DIR/$restore_path_file"
+  # Use pre-fetched restore path from metadata (or empty if not found)
+  restore_path="${SITE_RESTORE_PATHS[$site]:-}"
+  if [[ -n "$restore_path" ]]; then
     echo "$LOG_PREFIX   Restore path from metadata: $restore_path"
   fi
 
@@ -1353,15 +1397,22 @@ for site in "${SELECTED_SITES[@]}"; do
       if [[ -z "$restore_path" ]]; then
         echo "$LOG_PREFIX   [ERROR] No restore path provided."
         rm -f "$local_file"
+        SKIPPED_SITES+=("$site:no_path_provided")
         continue
       fi
       if [[ ! -d "$restore_path" ]]; then
         echo "$LOG_PREFIX   [WARNING] Path does not exist: $restore_path"
         read -p "  Create this directory? (y/N): " create_dir
         if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-          mkdir -p "$restore_path" || { echo "$LOG_PREFIX   [ERROR] Could not create directory"; rm -f "$local_file"; continue; }
+          if ! mkdir -p "$restore_path"; then
+            echo "$LOG_PREFIX   [ERROR] Could not create directory"
+            rm -f "$local_file"
+            FAILED_SITES+=("$site:mkdir_failed")
+            continue
+          fi
         else
           rm -f "$local_file"
+          SKIPPED_SITES+=("$site:path_not_created")
           continue
         fi
       fi
@@ -1371,6 +1422,7 @@ for site in "${SELECTED_SITES[@]}"; do
       if [[ -z "$dir_name" ]]; then
         echo "$LOG_PREFIX   [ERROR] Could not determine directory name from archive"
         rm -f "$local_file"
+        FAILED_SITES+=("$site:invalid_archive")
         continue
       fi
       echo "$LOG_PREFIX   [INFO] Old backup format detected (directory: $dir_name)"
@@ -1395,6 +1447,7 @@ for site in "${SELECTED_SITES[@]}"; do
     if [[ ! -d "$restore_path" ]]; then
       echo "$LOG_PREFIX   [ERROR] Restore path does not exist: $restore_path"
       rm -f "$local_file"
+      FAILED_SITES+=("$site:path_not_exists")
       continue
     fi
 
@@ -1420,6 +1473,7 @@ for site in "${SELECTED_SITES[@]}"; do
       echo "$LOG_PREFIX   Ownership set to: $dir_owner"
       # Remove backup on success
       [[ -n "$backup_name" && -d "$backup_name" ]] && rm -rf "$backup_name"
+      RESTORED_SITES+=("$site")
     else
       echo "$LOG_PREFIX   [ERROR] Extraction failed"
       # Restore backup if we made one
@@ -1429,6 +1483,7 @@ for site in "${SELECTED_SITES[@]}"; do
         rm -rf "$backup_name"
         echo "$LOG_PREFIX   Restored original contents"
       fi
+      FAILED_SITES+=("$site:extraction_failed")
     fi
   else
     # OLD FORMAT: Archive contains full directory - replace entire directory
@@ -1448,6 +1503,7 @@ for site in "${SELECTED_SITES[@]}"; do
       echo "$LOG_PREFIX   Success"
       # Remove temp backup on success
       [[ -n "$backup_name" && -d "$extract_base_path/$backup_name" ]] && rm -rf "$extract_base_path/$backup_name"
+      RESTORED_SITES+=("$site")
     else
       echo "$LOG_PREFIX   [ERROR] Extraction failed"
       # Restore the backup if we made one
@@ -1455,15 +1511,73 @@ for site in "${SELECTED_SITES[@]}"; do
         mv "$extract_base_path/$backup_name" "$restore_path"
         echo "$LOG_PREFIX   Restored original directory"
       fi
+      FAILED_SITES+=("$site:extraction_failed")
     fi
   fi
 
   rm -f "$local_file"
 done
 
+# Final Summary
 echo
 echo "========================================================"
-echo "           Restore Complete!"
+echo "           Restore Summary"
+echo "========================================================"
+echo
+echo "Total sites selected: ${#SELECTED_SITES[@]}"
+echo
+
+if [[ ${#RESTORED_SITES[@]} -gt 0 ]]; then
+  echo "RESTORED SUCCESSFULLY (${#RESTORED_SITES[@]}):"
+  for site in "${RESTORED_SITES[@]}"; do
+    echo "  [OK] $site"
+  done
+  echo
+fi
+
+if [[ ${#FAILED_SITES[@]} -gt 0 ]]; then
+  echo "FAILED (${#FAILED_SITES[@]}):"
+  for entry in "${FAILED_SITES[@]}"; do
+    site="${entry%%:*}"
+    reason="${entry#*:}"
+    case "$reason" in
+      download_failed)    reason_text="Download failed" ;;
+      extraction_failed)  reason_text="Extraction failed" ;;
+      mkdir_failed)       reason_text="Could not create directory" ;;
+      path_not_exists)    reason_text="Restore path does not exist" ;;
+      invalid_archive)    reason_text="Invalid archive format" ;;
+      *)                  reason_text="$reason" ;;
+    esac
+    echo "  [FAIL] $site - $reason_text"
+  done
+  echo
+fi
+
+if [[ ${#SKIPPED_SITES[@]} -gt 0 ]]; then
+  echo "SKIPPED (${#SKIPPED_SITES[@]}):"
+  for entry in "${SKIPPED_SITES[@]}"; do
+    site="${entry%%:*}"
+    reason="${entry#*:}"
+    case "$reason" in
+      checksum_mismatch)  reason_text="Checksum mismatch (user declined)" ;;
+      no_path_provided)   reason_text="No restore path provided" ;;
+      path_not_created)   reason_text="User declined to create path" ;;
+      *)                  reason_text="$reason" ;;
+    esac
+    echo "  [SKIP] $site - $reason_text"
+  done
+  echo
+fi
+
+# Final status
+if [[ ${#RESTORED_SITES[@]} -eq ${#SELECTED_SITES[@]} ]]; then
+  echo "Status: ALL SITES RESTORED SUCCESSFULLY"
+elif [[ ${#RESTORED_SITES[@]} -gt 0 ]]; then
+  echo "Status: PARTIAL RESTORE (${#RESTORED_SITES[@]}/${#SELECTED_SITES[@]} succeeded)"
+else
+  echo "Status: NO SITES RESTORED"
+fi
+
 echo "========================================================"
 echo
 read -p "Press Enter to continue..." _

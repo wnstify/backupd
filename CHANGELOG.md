@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.3] - 2025-12-22
+
+### Fixed
+
+- **Files Restore "All Sites" Bug** - Fixed critical issue where restoring all sites could silently skip some sites
+  - Added pre-flight check to identify sites missing restore-path metadata before starting
+  - User is now warned about sites requiring manual path entry before restore begins
+  - Added comprehensive tracking of restored/failed/skipped sites throughout the process
+  - Added detailed final summary showing:
+    - Number of sites successfully restored
+    - Sites that failed with specific error reasons
+    - Sites that were skipped and why
+    - Overall status (ALL RESTORED / PARTIAL / NONE)
+
+### Changed
+
+- **Restore Path Pre-fetch** - Restore path metadata is now fetched once during pre-flight check
+  - Eliminates redundant remote calls during restore loop
+  - Provides upfront visibility into which sites need manual paths
+
+### Technical Details
+
+- Silent `continue` statements now track failures/skips in arrays
+- Failure reasons are categorized: `download_failed`, `extraction_failed`, `mkdir_failed`, `path_not_exists`, `invalid_archive`
+- Skip reasons are categorized: `checksum_mismatch`, `no_path_provided`, `path_not_created`
+
+---
+
 ## [2.2.2] - 2025-12-22
 
 ### Changed
