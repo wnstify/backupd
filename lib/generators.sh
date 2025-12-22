@@ -1472,7 +1472,7 @@ for site in "${SELECTED_SITES[@]}"; do
       chown -R "$dir_owner" "$restore_path" 2>/dev/null || true
       echo "$LOG_PREFIX   Ownership set to: $dir_owner"
       # Remove backup on success
-      [[ -n "$backup_name" && -d "$backup_name" ]] && rm -rf "$backup_name"
+      [[ -n "$backup_name" && -d "$backup_name" ]] && rm -rf "$backup_name" || true
       RESTORED_SITES+=("$site")
     else
       echo "$LOG_PREFIX   [ERROR] Extraction failed"
@@ -1502,7 +1502,7 @@ for site in "${SELECTED_SITES[@]}"; do
     if tar -xzf "$local_file" -C "$extract_base_path" 2>/dev/null; then
       echo "$LOG_PREFIX   Success"
       # Remove temp backup on success
-      [[ -n "$backup_name" && -d "$extract_base_path/$backup_name" ]] && rm -rf "$extract_base_path/$backup_name"
+      [[ -n "$backup_name" && -d "$extract_base_path/$backup_name" ]] && rm -rf "$extract_base_path/$backup_name" || true
       RESTORED_SITES+=("$site")
     else
       echo "$LOG_PREFIX   [ERROR] Extraction failed"

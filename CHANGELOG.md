@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.4] - 2025-12-22
+
+### Fixed
+
+- **Restore Loop Early Exit** - Fixed critical bug where restore loop would exit after first site
+  - Cause: `set -e` combined with conditional cleanup `[[ ... ]] && rm` returning exit code 1 when condition was false
+  - When a site had no backup to clean up (empty `backup_name`), the condition failed and `set -e` terminated the script
+  - Fix: Added `|| true` to conditional cleanup lines to ensure zero exit code
+  - Affected: Both new format (contents-only) and old format (directory) extraction paths
+
+---
+
 ## [2.2.3] - 2025-12-22
 
 ### Fixed
