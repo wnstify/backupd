@@ -1453,11 +1453,12 @@ for site in "${SELECTED_SITES[@]}"; do
   echo "$LOG_PREFIX   DEBUG: Archive size: $(ls -lh "$local_file" 2>/dev/null | awk '{print $5}')"
 
   # List archive contents - try pigz first, then gzip
+  # Note: Use 2>/dev/null to avoid SIGPIPE with pipefail when head closes early
   if command -v pigz >/dev/null 2>&1; then
-    first_entry=$(tar -I pigz -tf "$local_file" 2>&1 | head -1)
+    first_entry=$(tar -I pigz -tf "$local_file" 2>/dev/null | head -1 || true)
     archive_list_method="pigz"
   else
-    first_entry=$(tar -tzf "$local_file" 2>&1 | head -1)
+    first_entry=$(tar -tzf "$local_file" 2>/dev/null | head -1 || true)
     archive_list_method="gzip"
   fi
 
@@ -1465,9 +1466,9 @@ for site in "${SELECTED_SITES[@]}"; do
   echo "$LOG_PREFIX   DEBUG: First entry: '$first_entry'"
   echo "$LOG_PREFIX   DEBUG: Archive contents (first 10):"
   if command -v pigz >/dev/null 2>&1; then
-    tar -I pigz -tf "$local_file" 2>&1 | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done
+    tar -I pigz -tf "$local_file" 2>/dev/null | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done || true
   else
-    tar -tzf "$local_file" 2>&1 | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done
+    tar -tzf "$local_file" 2>/dev/null | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done || true
   fi
 
   if [[ "$first_entry" == "./" || "$first_entry" == "." ]]; then
@@ -1515,10 +1516,11 @@ for site in "${SELECTED_SITES[@]}"; do
 
     if [[ -z "$extract_error" && $file_count -gt 0 ]]; then
       echo "$LOG_PREFIX   Success ($file_count items extracted)"
-      # Fix ownership - set to directory owner
-      dir_owner=$(stat -c '%U:%G' "$restore_path" 2>/dev/null || echo "www-data:www-data")
-      chown -R "$dir_owner" "$restore_path" 2>/dev/null || true
-      echo "$LOG_PREFIX   Ownership set to: $dir_owner"
+      # Fix ownership - contents should be user:user, directory keeps user:www-data
+      dir_user=$(stat -c '%U' "$restore_path" 2>/dev/null || echo "www-data")
+      # Apply user:user to contents only (preserve directory group for web server access)
+      find "$restore_path" -mindepth 1 -exec chown "$dir_user:$dir_user" {} + 2>/dev/null || true
+      echo "$LOG_PREFIX   Ownership set to: $dir_user:$dir_user (contents)"
       # Remove backup on success
       [[ -n "$backup_name" && -d "$backup_name" ]] && rm -rf "$backup_name" || true
       RESTORED_SITES+=("$site")
