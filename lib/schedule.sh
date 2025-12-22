@@ -556,7 +556,7 @@ EOF
   print_success "Monthly full verification enabled"
   print_info "Schedule: 1st of each month at 3 AM"
   print_info "Script: $SCRIPTS_DIR/verify_full_backup.sh"
-  print_info "Log: $INSTALL_DIR/logs/verify_logfile.log"
+  print_info "Log: $INSTALL_DIR/logs/verify_full_logfile.log"
   echo
   print_info "Run manually anytime: systemctl start backupd-verify-full"
   press_enter_to_continue

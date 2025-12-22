@@ -465,6 +465,7 @@ Requires=backupd-verify.service
 
 [Timer]
 OnCalendar=Sun *-*-* 02:00:00
+RandomizedDelaySec=300
 Persistent=true
 
 [Install]
@@ -498,6 +499,7 @@ Requires=backupd-verify-full.service
 
 [Timer]
 OnCalendar=*-*-01 03:00:00
+RandomizedDelaySec=3600
 Persistent=true
 
 [Install]

@@ -101,7 +101,7 @@ run_setup() {
     echo
     echo "  -- Or select a different panel --"
     echo "  2) Enhance      /var/www/*/public_html"
-    echo "  3) xCloud       /var/www/*/public_html"
+    echo "  3) xCloud       /var/www/*"
     echo "  4) RunCloud     /home/*/webapps/*"
     echo "  5) Ploi         /home/*/*"
     echo "  6) cPanel       /home/*/public_html"

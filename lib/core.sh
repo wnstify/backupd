@@ -314,7 +314,7 @@ safe_write_file() {
 # webroot_subdir: subdirectory containing web files (empty = direct)
 declare -A PANEL_DEFINITIONS=(
   ["enhance"]="Enhance|/var/www/*/public_html|public_html|service"
-  ["xcloud"]="xCloud|/var/www/*/public_html|public_html|user"
+  ["xcloud"]="xCloud|/var/www/*|.|user"
   ["runcloud"]="RunCloud|/home/*/webapps/*|.|user"
   ["ploi"]="Ploi|/home/*/*|.|user"
   ["cpanel"]="cPanel|/home/*/public_html|.|file"

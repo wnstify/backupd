@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.2] - 2025-12-22
+
+### Changed
+
+- **xCloud Panel Path** - Updated default path pattern for xCloud panel
+  - Changed from `/var/www/*/public_html` (webroot: `public_html`) to `/var/www/*` (webroot: `.`)
+  - xCloud sites are backed up directly from `/var/www/*` without subdirectory
+  - Detection method unchanged: checks for `xcloud` user in `/etc/passwd`
+  - **Note**: Existing installations are unaffected (path stored in config file)
+
+### Fixed
+
+- **Systemd Timer Consistency** - Added missing `RandomizedDelaySec` to verification timers in install.sh
+  - `backupd-verify.timer`: Added `RandomizedDelaySec=300` (5 min jitter)
+  - `backupd-verify-full.timer`: Added `RandomizedDelaySec=3600` (1 hour jitter)
+  - Prevents thundering herd when multiple servers run verifications
+  - Now consistent with db/files backup timers
+
+- **Log Path Display** - Fixed incorrect log path shown when enabling monthly full verification
+  - Was showing: `verify_logfile.log`
+  - Now shows: `verify_full_logfile.log` (correct path)
+  - Only affected the message shown to users, not actual log location
+
+### Note
+
+> **Version 2.2.1 was skipped** due to a GitHub release artifact naming issue that caused the
+> auto-updater to fail. The release was retracted and v2.2.2 published with corrected asset names.
+
+---
+
 ## [2.2.0] - 2025-12-21
 
 ### Added
@@ -441,7 +471,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Each panel has: name, path pattern, webroot subdirectory, detection method
 - Supported panels:
   - Enhance: `/var/www/*/public_html` (webroot: `public_html`) - detected via `appcd` service
-  - xCloud: `/var/www/*/public_html` (webroot: `public_html`) - detected via `xcloud` user
+  - xCloud: `/var/www/*` (webroot: `.`) - detected via `xcloud` user
   - RunCloud: `/home/*/webapps/*` (webroot: `.`) - detected via `runcloud` user
   - Ploi: `/home/*/*` (webroot: `.`) - detected via `ploi` user
   - cPanel: `/home/*/public_html` (webroot: `.`)
