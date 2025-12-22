@@ -1385,8 +1385,16 @@ for site in "${SELECTED_SITES[@]}"; do
 
   # If no metadata file, try to determine restore path from archive or prompt user
   if [[ -z "$restore_path" ]]; then
+    echo "$LOG_PREFIX   [DEBUG] No metadata restore path - detecting archive format..."
     # Check archive structure - old format had directory name, new format has ./
-    first_entry=$(tar -tzf "$local_file" 2>/dev/null | head -1)
+    # Use pigz if available (backups are compressed with pigz)
+    if command -v pigz >/dev/null 2>&1; then
+      first_entry=$(tar -I pigz -tf "$local_file" 2>/dev/null | head -1)
+      echo "$LOG_PREFIX   [DEBUG] Using pigz to read archive, first_entry='$first_entry'"
+    else
+      first_entry=$(tar -tzf "$local_file" 2>/dev/null | head -1)
+      echo "$LOG_PREFIX   [DEBUG] Using gzip to read archive, first_entry='$first_entry'"
+    fi
     if [[ "$first_entry" == "./" || "$first_entry" == "." ]]; then
       # New format: contents only, no metadata - need user input
       echo "$LOG_PREFIX   [INFO] New backup format detected (contents only)"
@@ -1439,7 +1447,29 @@ for site in "${SELECTED_SITES[@]}"; do
 
   # For new format (contents only), extract INTO the existing directory
   # For old format, extract the directory itself
-  first_entry=$(tar -tzf "$local_file" 2>/dev/null | head -1)
+
+  # DEBUG: Show archive info
+  echo "$LOG_PREFIX   DEBUG: Archive file: $local_file"
+  echo "$LOG_PREFIX   DEBUG: Archive size: $(ls -lh "$local_file" 2>/dev/null | awk '{print $5}')"
+
+  # List archive contents - try pigz first, then gzip
+  if command -v pigz >/dev/null 2>&1; then
+    first_entry=$(tar -I pigz -tf "$local_file" 2>&1 | head -1)
+    archive_list_method="pigz"
+  else
+    first_entry=$(tar -tzf "$local_file" 2>&1 | head -1)
+    archive_list_method="gzip"
+  fi
+
+  echo "$LOG_PREFIX   DEBUG: List method: $archive_list_method"
+  echo "$LOG_PREFIX   DEBUG: First entry: '$first_entry'"
+  echo "$LOG_PREFIX   DEBUG: Archive contents (first 10):"
+  if command -v pigz >/dev/null 2>&1; then
+    tar -I pigz -tf "$local_file" 2>&1 | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done
+  else
+    tar -tzf "$local_file" 2>&1 | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done
+  fi
+
   if [[ "$first_entry" == "./" || "$first_entry" == "." ]]; then
     # NEW FORMAT: Contents only - extract INTO existing directory
     # This preserves the public_html directory itself (important for overlay containers)
