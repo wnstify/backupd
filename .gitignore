@@ -67,9 +67,8 @@ CLAUDE_INDEX.md
 
 # ----- Testing -----
 test/
-tests/
+# Keep smoke_test.sh for CI (negation below)
 test_*
-*_test.sh
 
 # ----- Development -----
 dev/
@@ -109,6 +108,8 @@ MENU-WORKFLOW-ANALYSIS.md
 # ----- Test Artifacts (not tracked) -----
 CODEBASE-HEALTH-REPORT.md
 COMPREHENSIVE-TEST-SUMMARY.md
-tests/
-*.tar.gz
+# Allow tests/smoke_test.sh for CI
+!tests/
+tests/*
+!tests/smoke_test.sh
 SHA256SUMS
