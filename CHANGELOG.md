@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.9] - 2026-01-05
+
+### Fixed
+
+- **Error Logging System** - Errors now properly logged to `/var/log/backupd.log`
+  - `print_error()` now calls `log_error()` with stack trace
+  - `print_warning()` now calls `log_warn()` for audit trail
+  - Guards prevent issues during module load order
+  - Direct `echo >&2` patterns replaced with `print_error()`
+
+- **Backup Script Error Capture** - CLI wrapper captures generated script errors
+  - New `run_backup_script()` function in `lib/cli.sh`
+  - Extracts `[ERROR]` lines from script output
+  - Logs failures with context to structured log
+  - Handles `pipefail` correctly for exit code capture
+
+- **Dev Update Missing Files** - `--dev-update` now downloads all lib files
+  - Added missing: `lib/exitcodes.sh`, `lib/logging.sh`, `lib/cli.sh`
+  - File list now matches all 16 lib/*.sh files
+
+### Technical
+
+- `lib/core.sh`: `print_error()` and `print_warning()` now log with `type` guard
+- `lib/cli.sh`: New `run_backup_script()` wrapper (30 lines)
+- `lib/crypto.sh`: Direct stderr writes converted to `print_error()`
+- `lib/updater.sh`: `lib_files` array updated from 13 to 16 files
+
+---
+
 ## [2.2.8] - 2026-01-05
 
 ### Added

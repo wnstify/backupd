@@ -157,7 +157,7 @@ derive_key() {
         derive_key_argon2id "$secrets_dir"
       else
         # Critical error - can't decrypt without argon2
-        echo "ERROR: Argon2 required but not installed" >&2
+        print_error "Argon2 required but not installed"
         return 1
       fi
       ;;
@@ -344,7 +344,7 @@ migrate_secrets() {
 
   # Check if target version is available
   if [[ "$to_version" == "$CRYPTO_VERSION_ARGON2ID" ]] && ! argon2_available; then
-    echo "ERROR: Argon2 is not installed. Install with: sudo apt install argon2" >&2
+    print_error "Argon2 is not installed. Install with: sudo apt install argon2"
     return 1
   fi
 

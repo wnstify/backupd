@@ -5,6 +5,42 @@
 # CLIG compliant: https://clig.dev/
 # ============================================================================
 
+# ---------- Helper Functions ----------
+
+# Run a backup script and log any errors
+# Captures output, displays it, and logs errors if the script fails
+run_backup_script() {
+  local script_path="$1"
+  local backup_type="$2"
+  local exit_code=0
+  local temp_output
+
+  # Create temp file for capturing output
+  temp_output="$(mktemp)"
+
+  # Run script, capture output (disable pipefail temporarily to capture exit code)
+  set +o pipefail
+  bash "$script_path" 2>&1 | tee "$temp_output"
+  exit_code=${PIPESTATUS[0]}
+  set -o pipefail
+
+  # If script failed, log the error with context
+  if [[ $exit_code -ne 0 ]]; then
+    # Extract error lines from output
+    local error_lines
+    error_lines=$(grep -E '^\[ERROR\]|^ERROR:|failed|Failed' "$temp_output" 2>/dev/null | head -5 | tr '\n' ' ')
+
+    if [[ -n "$error_lines" ]]; then
+      log_error "Backup failed ($backup_type): $error_lines"
+    else
+      log_error "Backup failed ($backup_type) with exit code $exit_code"
+    fi
+  fi
+
+  rm -f "$temp_output"
+  return $exit_code
+}
+
 # ---------- CLI Dispatcher ----------
 
 # Main dispatcher - routes subcommands to handlers
@@ -77,7 +113,7 @@ cli_backup() {
           return 0
         fi
         [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting database backup..."
-        bash "$SCRIPTS_DIR/db_backup.sh"
+        run_backup_script "$SCRIPTS_DIR/db_backup.sh" "database"
         return $?
       else
         print_error "Database backup script not found. Run setup first."
@@ -91,7 +127,7 @@ cli_backup() {
           return 0
         fi
         [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting files backup..."
-        bash "$SCRIPTS_DIR/files_backup.sh"
+        run_backup_script "$SCRIPTS_DIR/files_backup.sh" "files"
         return $?
       else
         print_error "Files backup script not found. Run setup first."
@@ -106,7 +142,7 @@ cli_backup() {
           dry_run_msg "bash $SCRIPTS_DIR/db_backup.sh"
         else
           [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting database backup..."
-          bash "$SCRIPTS_DIR/db_backup.sh" || exit_code=$?
+          run_backup_script "$SCRIPTS_DIR/db_backup.sh" "database" || exit_code=$?
         fi
       else
         print_error "Database backup script not found."
@@ -118,7 +154,7 @@ cli_backup() {
           dry_run_msg "bash $SCRIPTS_DIR/files_backup.sh"
         else
           [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting files backup..."
-          bash "$SCRIPTS_DIR/files_backup.sh" || exit_code=$?
+          run_backup_script "$SCRIPTS_DIR/files_backup.sh" "files" || exit_code=$?
         fi
       else
         print_error "Files backup script not found."

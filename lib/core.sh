@@ -57,14 +57,18 @@ print_success() {
   echo -e "${GREEN}✓ $1${NC}"
 }
 
-# Errors always print (even in quiet mode)
+# Errors always print (even in quiet mode) and log to file
 print_error() {
   echo -e "${RED}✗ $1${NC}" >&2
+  # Log if logging module is loaded (core.sh sourced before logging.sh)
+  type log_error &>/dev/null && log_error "$1"
 }
 
 print_warning() {
   [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   echo -e "${YELLOW}! $1${NC}"
+  # Log if logging module is loaded (core.sh sourced before logging.sh)
+  type log_warn &>/dev/null && log_warn "$1"
 }
 
 print_info() {
@@ -320,7 +324,7 @@ create_secure_temp() {
 
   # Verify it's actually a directory and owned by us
   if [[ ! -d "$temp_dir" ]] || [[ ! -O "$temp_dir" ]]; then
-    echo "Failed to create secure temp directory" >&2
+    print_error "Failed to create secure temp directory"
     return 1
   fi
 

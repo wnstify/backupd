@@ -560,11 +560,13 @@ do_dev_update() {
   local temp_dir
   temp_dir=$(create_secure_temp "backupd-dev-update")
 
-  # List of files to download
+  # List of files to download (must match all lib files in backupd.sh source order)
   local main_script="backupd.sh"
   local lib_files=(
     "lib/core.sh"
+    "lib/exitcodes.sh"
     "lib/debug.sh"
+    "lib/logging.sh"
     "lib/crypto.sh"
     "lib/config.sh"
     "lib/generators.sh"
@@ -576,6 +578,7 @@ do_dev_update() {
     "lib/setup.sh"
     "lib/updater.sh"
     "lib/notifications.sh"
+    "lib/cli.sh"
   )
 
   # Download main script
