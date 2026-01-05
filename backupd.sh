@@ -61,6 +61,7 @@ source "$LIB_DIR/schedule.sh"   # Schedule management
 source "$LIB_DIR/setup.sh"      # Setup wizard
 source "$LIB_DIR/updater.sh"    # Auto-update functionality
 source "$LIB_DIR/notifications.sh" # Notification configuration
+source "$LIB_DIR/cli.sh"        # CLI subcommand dispatcher (CLIG compliant)
 
 # ---------- Install Command ----------
 
@@ -246,7 +247,18 @@ show_help() {
   echo "Backupd v${VERSION}"
   echo "by ${AUTHOR} (${WEBSITE})"
   echo
-  echo "Usage: backupd [OPTIONS]"
+  echo "Usage: backupd [COMMAND] [OPTIONS]"
+  echo "       backupd [OPTIONS]"
+  echo
+  echo "Commands:"
+  echo "  backup {db|files|all}       Run backup operations"
+  echo "  restore {db|files} [--list] Restore from backup"
+  echo "  status                      Show system status"
+  echo "  verify [--quick|--full]     Verify backup integrity"
+  echo "  schedule {list|enable|disable} Manage schedules"
+  echo "  logs [TYPE] [--lines N]     View backup logs"
+  echo
+  echo "Run 'backupd COMMAND --help' for more information on a command."
   echo
   echo "Options:"
   echo "  --help, -h            Show this help message"
@@ -454,6 +466,15 @@ parse_arguments() {
     fi
   fi
 
+  # Check for subcommands first (dispatch to CLI handler)
+  case "${1:-}" in
+    backup|restore|status|verify|schedule|logs)
+      cli_dispatch "$@"
+      exit $?
+      ;;
+  esac
+
+  # Handle option flags
   case "${1:-}" in
     --help|-h)
       show_help
@@ -509,6 +530,30 @@ parse_arguments() {
 case "${1:-}" in
   --help|-h|--version|-v|--debug-status|--debug-export)
     parse_arguments "$@"
+    ;;
+esac
+
+# Handle subcommand --help without requiring root
+# Check if second arg is --help or -h for any subcommand
+case "${1:-}" in
+  backup|restore|status|verify|schedule|logs)
+    if [[ "${2:-}" == "--help" ]] || [[ "${2:-}" == "-h" ]] || [[ -z "${2:-}" && "${1:-}" != "backup" && "${1:-}" != "restore" ]]; then
+      # status, verify, schedule, logs can show help without args
+      # backup and restore need a subcommand or --help
+      case "${1:-}" in
+        status|schedule|logs)
+          # These show useful output even without root for --help
+          if [[ "${2:-}" == "--help" ]] || [[ "${2:-}" == "-h" ]]; then
+            parse_arguments "$@"
+          fi
+          ;;
+        *)
+          if [[ "${2:-}" == "--help" ]] || [[ "${2:-}" == "-h" ]]; then
+            parse_arguments "$@"
+          fi
+          ;;
+      esac
+    fi
     ;;
 esac
 
