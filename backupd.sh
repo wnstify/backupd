@@ -48,6 +48,7 @@ fi
 
 # Source all modules in order (dependencies first)
 source "$LIB_DIR/core.sh"       # Colors, print functions, validation, helpers
+source "$LIB_DIR/exitcodes.sh"  # Standardized exit codes (CLIG compliant)
 source "$LIB_DIR/debug.sh"      # Debug logging (must be early for other modules)
 source "$LIB_DIR/crypto.sh"     # Encryption, secrets, key derivation
 source "$LIB_DIR/config.sh"     # Configuration read/write
