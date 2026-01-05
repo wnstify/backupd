@@ -134,16 +134,21 @@ cli_backup_help() {
   cat <<EOF
 Usage: backupd backup {db|files|all} [OPTIONS]
 
-Run backup operations non-interactively.
+Create backups of database and/or files, uploading to configured remote storage.
+Requires root privileges and prior configuration via 'backupd' interactive setup.
 
 Subcommands:
-  db, database    Run database backup only
-  files           Run files backup only
-  all, both       Run both database and files backup
+  db, database    Backup MySQL/MariaDB databases
+  files           Backup web files (sites, configs)
+  all, both       Backup both database and files
 
 Options:
   --dry-run, -n   Preview what would be executed without running
   --help, -h      Show this help message
+
+Global Options:
+  --quiet, -q     Suppress non-essential output (ideal for cron)
+  --debug         Enable debug logging
 
 Examples:
   backupd backup db              # Backup database now
@@ -151,6 +156,8 @@ Examples:
   backupd backup all             # Backup both
   backupd backup db --dry-run    # Preview database backup
   backupd --quiet backup db      # Silent mode for cron
+
+See also: restore, verify, schedule, status
 EOF
 }
 
@@ -289,16 +296,21 @@ cli_restore_help() {
   cat <<EOF
 Usage: backupd restore {db|files} [OPTIONS]
 
-Restore from backup.
+Restore database or files from a previous backup stored in remote storage.
+Requires root privileges. Restore is interactive (prompts for backup selection).
 
 Subcommands:
-  db, database    Restore database backup
-  files           Restore files backup
+  db, database    Restore database backup (decrypts and imports SQL)
+  files           Restore files backup (extracts archive to original location)
 
 Options:
   --list, -l      List available backups without restoring
   --dry-run, -n   Preview what would be executed without running
   --help, -h      Show this help message
+
+Global Options:
+  --json          Output backup list in JSON format (with --list)
+  --quiet, -q     Suppress non-essential output
 
 Examples:
   backupd restore db --list      # List available database backups
@@ -306,6 +318,8 @@ Examples:
   backupd restore db             # Interactive database restore
   backupd restore db --dry-run   # Preview restore operation
   backupd --json restore db -l   # JSON list of backups
+
+See also: backup, verify, status
 EOF
 }
 
@@ -493,15 +507,22 @@ cli_status_help() {
   cat <<EOF
 Usage: backupd status [OPTIONS]
 
-Show backup system status.
+Display backup system status including configuration, schedules, and recent activity.
+Shows script availability, scheduled timers, retention policy, and last backup times.
 
 Options:
-  --json          Output in JSON format
+  --json          Output in JSON format (for scripting/monitoring)
   --help, -h      Show this help message
 
+Global Options:
+  --quiet, -q     Suppress headers and formatting
+
 Examples:
-  backupd status
-  backupd status --json
+  backupd status              # Human-readable status
+  backupd status --json       # JSON for monitoring tools
+  backupd status --json | jq .configured  # Check if configured
+
+See also: verify, schedule, logs
 EOF
 }
 
@@ -708,7 +729,8 @@ cli_verify_help() {
   cat <<EOF
 Usage: backupd verify [TYPE] [OPTIONS]
 
-Verify backup integrity.
+Verify backup integrity by checking checksums and optionally decrypting archives.
+Requires root privileges. Quick mode checks remote storage without downloading.
 
 Types:
   db, database    Verify database backups only
@@ -721,11 +743,19 @@ Options:
   --json          Output results in JSON format
   --help, -h      Show this help message
 
+Exit Codes:
+  0               All checks passed
+  1               One or more checks failed
+  2               Warnings (missing checksums)
+
 Examples:
   backupd verify                  # Quick check of all backups
   backupd verify db --quick       # Quick check of database backups
   backupd verify files            # Quick check of files backups
   backupd verify --json           # JSON output for scripting
+  backupd verify --json | jq .status  # Get overall status
+
+See also: backup, restore, status
 EOF
 }
 
@@ -980,12 +1010,13 @@ cli_schedule_help() {
   cat <<EOF
 Usage: backupd schedule [COMMAND] [TYPE]
 
-Manage backup schedules.
+Manage systemd timer-based backup schedules. Schedules must first be configured
+via the interactive menu before they can be enabled/disabled here.
 
 Commands:
   list              Show current schedules (default)
-  enable TYPE       Enable a backup schedule
-  disable TYPE      Disable a backup schedule
+  enable TYPE       Enable a backup schedule timer
+  disable TYPE      Disable a backup schedule timer
 
 Types:
   db, database      Database backup timer
@@ -996,12 +1027,16 @@ Options:
   --json            Output in JSON format (for list)
   --help, -h        Show this help message
 
+Requires: Root privileges for enable/disable operations.
+
 Examples:
   backupd schedule                  # List all schedules
   backupd schedule list
-  backupd schedule --json           # JSON output
+  backupd schedule --json           # JSON output for monitoring
   backupd schedule enable db        # Enable database backup timer
   backupd schedule disable files    # Disable files backup timer
+
+See also: status, backup, verify
 EOF
 }
 
@@ -1107,21 +1142,28 @@ cli_logs_help() {
   cat <<EOF
 Usage: backupd logs [TYPE] [OPTIONS]
 
-View backup logs.
+View backup operation logs stored in /etc/backupd/logs/.
+Useful for debugging backup issues or monitoring recent activity.
 
 Types:
-  db, database    Database backup log
-  files           Files backup log
-  verify          Verification log
+  db, database    Database backup log (db_logfile.log)
+  files           Files backup log (files_logfile.log)
+  verify          Verification log (verify_logfile.log)
   all             All logs (default)
 
 Options:
   --lines N, -n N   Number of lines to show (default: 50)
   --help, -h        Show this help message
 
+Global Options:
+  --quiet, -q       Suppress log type headers
+
 Examples:
   backupd logs                # Show all logs (last 50 lines each)
   backupd logs db             # Show database backup log
   backupd logs files -n 100   # Show last 100 lines of files log
+  backupd logs verify         # Show verification log
+
+See also: status, verify, backup
 EOF
 }
