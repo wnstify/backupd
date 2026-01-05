@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/wnstify/backupd/blob/main/USAGE.md
+    about: Check the usage guide before opening an issue
+  - name: Debug Guide
+    url: https://github.com/wnstify/backupd/blob/main/DEBUG.md
+    about: Troubleshooting and debugging guide
+  - name: Website
+    url: https://backupd.io
+    about: Visit the official website

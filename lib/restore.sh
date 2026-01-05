@@ -7,6 +7,8 @@
 # ---------- Run Restore ----------
 
 run_restore() {
+  log_func_enter
+  debug_enter "run_restore"
   print_header
   echo "Restore from Backup"
   echo "==================="

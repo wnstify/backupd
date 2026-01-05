@@ -7,6 +7,8 @@
 # ---------- Manage Notifications ----------
 
 manage_notifications() {
+  log_func_enter
+  debug_enter "manage_notifications"
   while true; do
     print_header
     echo "Notifications"
@@ -241,6 +243,9 @@ configure_webhook() {
 # ---------- Test Notifications ----------
 
 test_notifications() {
+  log_func_enter
+  debug_enter "test_notifications"
+  log_info "Testing notifications"
   print_header
   echo "Test Notifications"
   echo "=================="

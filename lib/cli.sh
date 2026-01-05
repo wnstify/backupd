@@ -10,6 +10,9 @@
 # Main dispatcher - routes subcommands to handlers
 # Returns 0 on success, appropriate exit code on failure
 cli_dispatch() {
+  log_func_enter
+  debug_enter "cli_dispatch" "$@"
+  log_info "CLI dispatch: $*"
   local subcommand="${1:-}"
   shift || true
 
@@ -43,6 +46,8 @@ cli_dispatch() {
 # ---------- Backup Subcommand ----------
 
 cli_backup() {
+  log_func_enter
+  debug_enter "cli_backup" "$@"
   local backup_type="${1:-}"
 
   case "$backup_type" in

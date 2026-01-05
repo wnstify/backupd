@@ -50,6 +50,7 @@ fi
 source "$LIB_DIR/core.sh"       # Colors, print functions, validation, helpers
 source "$LIB_DIR/exitcodes.sh"  # Standardized exit codes (CLIG compliant)
 source "$LIB_DIR/debug.sh"      # Debug logging (must be early for other modules)
+source "$LIB_DIR/logging.sh"    # Comprehensive structured logging
 source "$LIB_DIR/crypto.sh"     # Encryption, secrets, key derivation
 source "$LIB_DIR/config.sh"     # Configuration read/write
 source "$LIB_DIR/generators.sh" # Script generation (needed by setup/schedule)
@@ -275,8 +276,11 @@ show_help() {
   echo "  --migrate-encryption  Upgrade encryption to best available algorithm"
   echo "  --encryption-status   Show current encryption algorithm status"
   echo
-  echo "Debug options:"
-  echo "  --debug               Enable debug logging for this session"
+  echo "Logging options (logs automatically to /var/log/backupd.log):"
+  echo "  --log-file PATH       Write logs to custom file instead"
+  echo "  --verbose             Increase output verbosity (can be repeated: -vv)"
+  echo "  --log-export          Export sanitized log for GitHub issue submission"
+  echo "  --debug               Enable legacy debug logging for this session"
   echo "  --debug-status        Show debug log status and location"
   echo "  --debug-export        Export sanitized debug log for sharing"
   echo
@@ -286,9 +290,12 @@ show_help() {
   echo "  backupd restore db --list      # List available DB backups"
   echo "  backupd verify --dry-run       # Preview verification"
   echo "  backupd status --json          # Get status as JSON"
+  echo "  backupd --verbose backup all   # Verbose output with debug logs"
+  echo "  backupd --log-export           # Export log for GitHub issue"
   echo
   echo "Environment variables:"
-  echo "  BACKUPD_DEBUG=1       Enable debug logging"
+  echo "  BACKUPD_LOG_FILE=path Override default log file location"
+  echo "  BACKUPD_DEBUG=1       Enable legacy debug logging"
   echo "  NO_COLOR=1            Disable colored output"
   echo
   echo "Run without arguments to start the interactive menu."
@@ -445,52 +452,69 @@ regenerate_all_scripts() {
 }
 
 parse_arguments() {
-  # Handle --debug flag first (can be combined with other args)
-  if [[ "${1:-}" == "--debug" ]]; then
-    DEBUG_ENABLED=1
-    shift
-    # If no more args, continue to menu
-    if [[ -z "${1:-}" ]]; then
-      return 0
-    fi
-  fi
+  # Parse global flags that can be combined with other args
+  while [[ $# -gt 0 ]]; do
+    case "${1:-}" in
+      --debug)
+        DEBUG_ENABLED=1
+        shift
+        ;;
+      --quiet|-q)
+        QUIET_MODE=1
+        export QUIET_MODE
+        shift
+        ;;
+      --json)
+        JSON_OUTPUT=1
+        export JSON_OUTPUT
+        shift
+        ;;
+      --dry-run|-n)
+        DRY_RUN=1
+        export DRY_RUN
+        shift
+        ;;
+      --log-file)
+        if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+          echo "Error: --log-file requires a path argument"
+          exit 1
+        fi
+        log_set_file "$2"
+        shift 2
+        ;;
+      --verbose)
+        log_increase_verbosity
+        shift
+        ;;
+      -v)
+        # -v is version, not verbose
+        show_version
+        exit 0
+        ;;
+      -vv)
+        # Allow -vv for double verbosity
+        log_increase_verbosity
+        log_increase_verbosity
+        shift
+        ;;
+      *)
+        # Not a global flag, break to handle subcommands/options
+        break
+        ;;
+    esac
+  done
 
-  # Handle --quiet/-q flag (can be combined with other args)
-  if [[ "${1:-}" == "--quiet" ]] || [[ "${1:-}" == "-q" ]]; then
-    QUIET_MODE=1
-    export QUIET_MODE
-    shift
-    # If no more args, continue to menu
-    if [[ -z "${1:-}" ]]; then
-      return 0
-    fi
-  fi
-
-  # Handle --json flag (can be combined with other args)
-  if [[ "${1:-}" == "--json" ]]; then
-    JSON_OUTPUT=1
-    export JSON_OUTPUT
-    shift
-    # If no more args, continue to menu
-    if [[ -z "${1:-}" ]]; then
-      return 0
-    fi
-  fi
-
-  # Handle --dry-run/-n flag (can be combined with other args)
-  if [[ "${1:-}" == "--dry-run" ]] || [[ "${1:-}" == "-n" ]]; then
-    DRY_RUN=1
-    export DRY_RUN
-    shift
-    # If no more args, continue to menu
-    if [[ -z "${1:-}" ]]; then
-      return 0
-    fi
+  # If no more args, continue to menu
+  if [[ -z "${1:-}" ]]; then
+    return 0
   fi
 
   # Check for subcommands first (dispatch to CLI handler)
   case "${1:-}" in
     backup|restore|status|verify|schedule|logs)
+      # Initialize logging before dispatch (since we exit after)
+      log_init "$@"
+      trap 'log_end' EXIT
       cli_dispatch "$@"
       exit $?
       ;;
@@ -502,7 +526,7 @@ parse_arguments() {
       show_help
       exit 0
       ;;
-    --version|-v)
+    --version)
       show_version
       exit 0
       ;;
@@ -534,6 +558,10 @@ parse_arguments() {
       debug_export
       exit $?
       ;;
+    --log-export)
+      log_export_for_issue
+      exit $?
+      ;;
     "")
       # No arguments, continue to menu
       return 0
@@ -550,7 +578,7 @@ parse_arguments() {
 
 # Parse CLI arguments first (some don't require root)
 case "${1:-}" in
-  --help|-h|--version|-v|--debug-status|--debug-export)
+  --help|-h|--version|-v|--debug-status|--debug-export|--log-export)
     parse_arguments "$@"
     ;;
 esac
@@ -591,11 +619,15 @@ parse_arguments "$@"
 # Initialize debug logging (after parsing --debug flag)
 debug_init "$@"
 
-# Set up exit trap for debug logging
-trap 'debug_end' EXIT
+# Initialize structured logging (after parsing --log-file and --verbose flags)
+log_init "$@"
+
+# Set up exit trap for debug and structured logging
+trap 'debug_end; log_end' EXIT
 
 # Log startup
 debug_info "Backupd starting (PID: $$)"
+log_info "Backupd $VERSION starting (PID: $$)"
 
 # Create install directory if needed
 mkdir -p "$INSTALL_DIR"

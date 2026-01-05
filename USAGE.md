@@ -17,6 +17,7 @@ Complete usage documentation for **Backupd v2.2.7** by Backupd.
 - [Notifications](#notifications)
 - [Updating the Tool](#updating-the-tool)
 - [Command Line Usage](#command-line-usage)
+- [Logging & Debugging](#logging--debugging)
 - [Advanced Configuration](#advanced-configuration)
 - [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
@@ -1325,6 +1326,116 @@ Logs are automatically rotated when they exceed 10MB:
 
 ---
 
+## Logging & Debugging
+
+Backupd includes a comprehensive logging system that automatically records all operations with sensitive data redacted.
+
+### Automatic Logging
+
+All runs are automatically logged to `/var/log/backupd.log`:
+
+```bash
+# View logs in real-time
+sudo tail -f /var/log/backupd.log
+
+# View last 50 lines
+sudo tail -50 /var/log/backupd.log
+```
+
+### Log Levels
+
+| Level | Flag | What's Logged |
+|-------|------|---------------|
+| INFO | (default) | Errors, warnings, key operations |
+| DEBUG | `--verbose` | + System info, command details |
+| TRACE | `-vv` | + Function entry/exit, timing |
+
+```bash
+# Normal logging (INFO level)
+sudo backupd backup db
+
+# Verbose logging (DEBUG level)
+sudo backupd --verbose backup db
+
+# Very verbose logging (TRACE level)
+sudo backupd -vv backup db
+```
+
+### Log Format
+
+Logs include function name, file, and line number for easy debugging:
+
+```
+[2025-01-15 03:00:01.123] [INFO] [run_backup@backup.sh:45] Starting database backup
+[2025-01-15 03:00:01.456] [ERROR] [run_backup@backup.sh:78] Failed to connect to database
+--- Stack Trace ---
+  at run_backup() in backup.sh:78
+  at cli_backup() in cli.sh:25
+  at main() in backupd.sh:627
+--- End Stack Trace ---
+```
+
+### Auto-Redaction
+
+The logging system automatically redacts sensitive data:
+
+| Data Type | Example Before | Example After |
+|-----------|----------------|---------------|
+| Passwords | `password=secret123` | `password=[REDACTED]` |
+| Tokens | `token=tk_abc123` | `token=[REDACTED]` |
+| API keys | `sk_live_xyz789` | `[API_KEY]` |
+| Home paths | `/home/john/` | `/home/[USER]/` |
+| Secret dirs | `/etc/.a7x9m2k4/` | `/etc/[SECRET_DIR]/` |
+| Hashes | `a1b2c3d4e5f6...` (64 chars) | `<SHA256>` |
+
+### Export Log for GitHub Issues
+
+When reporting issues, export a sanitized log:
+
+```bash
+# Export sanitized log
+sudo backupd --log-export
+
+# Output: /tmp/backupd-issue-log.txt
+```
+
+The exported log includes:
+- System information (OS, bash version, tool versions)
+- Sanitized log entries (extra redaction pass)
+- GitHub-compatible markdown format
+
+**Always review the exported file before sharing.**
+
+### Custom Log File Location
+
+```bash
+# Per-command
+sudo backupd --log-file /custom/path.log backup db
+
+# Environment variable
+export BACKUPD_LOG_FILE=/custom/path.log
+sudo backupd backup db
+```
+
+### Legacy Debug Logging
+
+The older debug system is still available:
+
+```bash
+# Enable legacy debug mode
+BACKUPD_DEBUG=1 sudo backupd
+
+# Check debug status
+sudo backupd --debug-status
+
+# Export legacy debug log
+sudo backupd --debug-export
+```
+
+Legacy debug logs are stored at `/etc/backupd/logs/debug.log`.
+
+---
+
 ## Advanced Configuration
 
 ### Manual Configuration File
@@ -1455,10 +1566,37 @@ For additional cost savings, configure lifecycle rules on your cloud storage:
 
 ## Troubleshooting
 
+### Quick Diagnosis
+
+**Step 1: Check the structured log:**
+```bash
+# View recent errors (auto-logged)
+sudo tail -50 /var/log/backupd.log
+```
+
+**Step 2: Reproduce with verbose logging:**
+```bash
+# DEBUG level (shows system info)
+sudo backupd --verbose backup db
+
+# TRACE level (shows function tracing)
+sudo backupd -vv backup db
+```
+
+**Step 3: Export for GitHub issue:**
+```bash
+sudo backupd --log-export
+# Creates: /tmp/backupd-issue-log.txt
+```
+
 ### Backup Failures
 
-**Check logs first:**
+**Check logs:**
 ```bash
+# Structured log (auto-created)
+sudo tail -100 /var/log/backupd.log
+
+# Script-specific logs
 tail -100 /etc/backupd/logs/db_logfile.log
 tail -100 /etc/backupd/logs/files_logfile.log
 ```
@@ -1494,10 +1632,12 @@ rclone lsl remote:path/filename
 
 ### Getting Help
 
-1. Check the logs in `/etc/backupd/logs/`
-2. Run `rclone` commands manually to test
-3. Review [GitHub Issues](https://github.com/wnstify/backupd-tool/issues)
+1. **Check the structured log** at `/var/log/backupd.log`
+2. **Export sanitized log** with `backupd --log-export`
+3. **Attach log to GitHub issue** at [GitHub Issues](https://github.com/wnstify/backupd/issues)
 4. Contact support at [backupd.io](https://backupd.io)
+
+See [DEBUG.md](DEBUG.md) for comprehensive troubleshooting guide.
 
 ---
 

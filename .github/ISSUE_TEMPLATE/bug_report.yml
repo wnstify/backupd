@@ -1,0 +1,139 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before You Start
+
+        1. **Search existing issues** to avoid duplicates
+        2. **Export your debug log** - this helps us fix your issue faster:
+
+        ```bash
+        # Reproduce with verbose logging
+        sudo backupd -vv <your-command>
+
+        # Export sanitized log (safe to share)
+        sudo backupd --log-export
+        ```
+
+        The exported log at `/tmp/backupd-issue-log.txt` has sensitive data redacted.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug
+      placeholder: |
+        Example: Database backup fails with "connection refused" error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: What should have happened instead
+      placeholder: |
+        Example: Backup should complete and upload to cloud storage
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this bug?
+      placeholder: |
+        1. Run `sudo backupd backup db`
+        2. Wait for backup to start
+        3. See error message
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which component?
+      description: What part of backupd is affected?
+      options:
+        - Database backup
+        - Files backup
+        - Restore
+        - Scheduling
+        - Notifications
+        - Verification
+        - Setup wizard
+        - CLI commands
+        - Update system
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug log
+      description: |
+        Paste the contents of `/tmp/backupd-issue-log.txt` after running `sudo backupd --log-export`
+
+        **Review before pasting** - the log is sanitized but please double-check for any sensitive info.
+      render: text
+      placeholder: |
+        # Backupd Debug Log
+        # Generated: 2025-01-15T03:00:00+00:00
+        ...
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Backupd version
+      description: Run `backupd --version`
+      placeholder: "2.2.8"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Run `cat /etc/os-release | grep PRETTY_NAME`
+      placeholder: "Ubuntu 24.04 LTS"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      options:
+        - curl installer (main branch)
+        - curl installer (develop branch)
+        - Manual installation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Any other information that might help (screenshots, config details, etc.)
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: I reviewed the exported log for sensitive information
+          required: false
+        - label: I can reproduce this issue consistently
+          required: false

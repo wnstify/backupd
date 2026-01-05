@@ -7,6 +7,8 @@
 # ---------- Run Backup ----------
 
 run_backup() {
+  log_func_enter
+  debug_enter "run_backup"
   print_header
   echo "Run Backup"
   echo "=========="
@@ -83,6 +85,8 @@ run_backup() {
 # ---------- Run Cleanup Now ----------
 
 run_cleanup_now() {
+  log_func_enter
+  debug_enter "run_cleanup_now"
   print_header
   echo "Run Cleanup Now"
   echo "==============="

@@ -7,6 +7,9 @@
 # ---------- Setup Wizard ----------
 
 run_setup() {
+  log_func_enter
+  debug_enter "run_setup"
+  log_info "Starting setup wizard"
   print_header
   echo "Setup Wizard"
   echo "============"

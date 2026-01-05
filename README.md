@@ -114,7 +114,8 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 ├── backupd.sh                # Main script (entry point)
 ├── lib/                      # Modular library
 │   ├── core.sh               # Colors, validation, helpers
-│   ├── debug.sh              # Debug logging (sanitized)
+│   ├── logging.sh            # Structured logging with auto-redaction
+│   ├── debug.sh              # Legacy debug logging
 │   ├── crypto.sh             # Encryption, secrets
 │   ├── config.sh             # Configuration read/write
 │   ├── generators.sh         # Script generation
@@ -125,6 +126,7 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 │   ├── schedule.sh           # Schedule management
 │   ├── setup.sh              # Setup wizard
 │   ├── updater.sh            # Auto-update functionality
+│   ├── cli.sh                # CLI subcommand dispatcher
 │   └── notifications.sh      # Notification configuration
 ├── .config                   # Configuration (retention, paths, etc.)
 ├── scripts/
@@ -139,6 +141,8 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
     ├── files_logfile.log         # Files backup logs (auto-rotated)
     ├── verify_logfile.log        # Verification logs (auto-rotated)
     └── notification_failures.log # Failed notification attempts
+
+/var/log/backupd.log              # Structured error log (auto-created)
 
 /etc/.{random}/               # Encrypted secrets (hidden, immutable)
 ├── .s                        # Salt for key derivation
@@ -268,28 +272,32 @@ systemctl list-timers | grep backupd
 systemctl status backupd-db.timer
 ```
 
-### Debug Logging
+### Logging & Troubleshooting
 
-For troubleshooting issues, enable debug logging:
+All operations are **automatically logged** to `/var/log/backupd.log` with sensitive data redacted.
 
 ```bash
-# Enable debug mode for a session
-BACKUPD_DEBUG=1 sudo backupd
+# View recent logs
+sudo tail -f /var/log/backupd.log
 
-# Or use the --debug flag
-sudo backupd --debug
+# Verbose output (DEBUG level)
+sudo backupd --verbose backup db
 
-# Check debug log status
-sudo backupd --debug-status
+# Very verbose output (TRACE level with function tracing)
+sudo backupd -vv backup db
 
-# Export sanitized log for sharing (safe - no passwords/secrets)
-sudo backupd --debug-export
+# Export sanitized log for GitHub issues
+sudo backupd --log-export
 ```
 
-Debug logs are stored at `/etc/backupd/logs/debug.log` and automatically:
-- Redact sensitive data (passwords, tokens, secret paths)
-- Rotate when exceeding 5MB
-- Include system info, timestamps, and call stacks
+**Log features:**
+- Automatic error logging on every run
+- Function name, line number, and stack traces
+- Auto-redaction of passwords, tokens, paths, and secrets
+- System info (OS, bash version, tool versions)
+- GitHub Issues-compatible export format
+
+See [DEBUG.md](DEBUG.md) for comprehensive troubleshooting guide.
 
 ---
 
@@ -586,6 +594,7 @@ You'll be asked whether to keep or remove configuration and secrets.
 
 - [CHANGELOG.md](CHANGELOG.md) — Version history and changes
 - [USAGE.md](USAGE.md) — Detailed usage guide
+- [DEBUG.md](DEBUG.md) — Logging and troubleshooting guide
 - [SECURITY.md](SECURITY.md) — Security policy and best practices
 - [DISCLAIMER.md](DISCLAIMER.md) — Legal disclaimer and responsibilities
 

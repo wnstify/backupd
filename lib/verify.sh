@@ -12,6 +12,8 @@ FULL_VERIFY_INTERVAL_DAYS=30
 # Optimized: Uses only 1 API call per backup type (lists all files at once)
 
 verify_quick() {
+  log_func_enter
+  debug_enter "verify_quick" "$1"
   local backup_type="$1"  # "db", "files", or "both"
   local secrets_dir rclone_remote rclone_db_path rclone_files_path
   secrets_dir="$(get_secrets_dir)"
@@ -265,6 +267,8 @@ show_full_verify_reminder() {
 # ---------- Verify Backup Integrity (Menu) ----------
 
 verify_backup_integrity() {
+  log_func_enter
+  debug_enter "verify_backup_integrity"
   while true; do
     print_header
     echo "Verify Backup Integrity"

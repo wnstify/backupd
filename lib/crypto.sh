@@ -228,6 +228,8 @@ init_secure_storage() {
 }
 
 store_secret() {
+  log_func_enter
+  debug_enter "store_secret" "$1" "$2" "[REDACTED]"
   local secrets_dir="$1"
   local secret_name="$2"
   local secret_value="$3"
@@ -249,11 +251,14 @@ store_secret() {
 }
 
 get_secret() {
+  log_func_enter
+  debug_enter "get_secret" "$1" "$2"
   local secrets_dir="$1"
   local secret_name="$2"
   local key version iterations
 
   if [[ ! -f "$secrets_dir/$secret_name" ]]; then
+    log_debug "Secret file not found: $secret_name"
     echo ""
     return 1
   fi

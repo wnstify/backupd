@@ -7,6 +7,8 @@
 # ---------- Status Display ----------
 
 show_status() {
+  log_func_enter
+  debug_enter "show_status"
   print_header
   echo "System Status"
   echo "============="

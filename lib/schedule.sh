@@ -7,6 +7,8 @@
 # ---------- Manage Schedules ----------
 
 manage_schedules() {
+  log_func_enter
+  debug_enter "manage_schedules"
   while true; do
     print_header
     echo "Manage Backup Schedules"
@@ -212,6 +214,8 @@ change_retention_policy() {
 }
 
 set_systemd_schedule() {
+  log_func_enter
+  debug_enter "set_systemd_schedule" "$@"
   local timer_type="$1"
   local display_name="$2"
   local timer_name="backupd-${timer_type}.timer"

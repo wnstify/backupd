@@ -83,6 +83,11 @@ debug_log() {
   message="$(debug_sanitize "$*")"
 
   echo "[$timestamp] $message" >> "$DEBUG_LOG_FILE" 2>/dev/null || true
+
+  # Also forward to structured logging system if available and configured
+  if [[ -n "${LOG_FILE:-}" ]] && type log_debug &>/dev/null 2>&1; then
+    log_debug "$message" 2>/dev/null || true
+  fi
 }
 
 # Log with level prefix
@@ -90,6 +95,17 @@ debug_log_level() {
   local level="$1"
   shift
   debug_log "[$level] $*"
+
+  # Forward to structured logging system with appropriate level
+  if [[ -n "${LOG_FILE:-}" ]] && type log_info &>/dev/null 2>&1; then
+    case "$level" in
+      ERROR) log_error "$*" 2>/dev/null || true ;;
+      WARN)  log_warn "$*" 2>/dev/null || true ;;
+      INFO)  log_info "$*" 2>/dev/null || true ;;
+      DEBUG) log_debug "$*" 2>/dev/null || true ;;
+      TRACE) log_trace "$*" 2>/dev/null || true ;;
+    esac
+  fi
 }
 
 # Convenience functions for different log levels
@@ -213,7 +229,7 @@ debug_log_system_info() {
 
 # ---------- Function Tracing ----------
 
-# Log function entry
+# Log function entry (integrates with structured logging)
 debug_enter() {
   local func_name="$1"
   shift
@@ -222,13 +238,23 @@ debug_enter() {
     args=" args=($(debug_sanitize "$*"))"
   fi
   debug_trace "ENTER $func_name$args"
+
+  # Also use structured logging if available
+  if type log_func_enter &>/dev/null 2>&1; then
+    log_func_enter "$@" 2>/dev/null || true
+  fi
 }
 
-# Log function exit
+# Log function exit (integrates with structured logging)
 debug_exit() {
   local func_name="$1"
   local exit_code="${2:-0}"
   debug_trace "EXIT $func_name (code=$exit_code)"
+
+  # Also use structured logging if available
+  if type log_func_exit &>/dev/null 2>&1; then
+    log_func_exit "$exit_code" 2>/dev/null || true
+  fi
 }
 
 # Log a command before execution (sanitized)
