@@ -22,9 +22,13 @@ else
     NC=''
 fi
 
+# CLIG globals for output control
+QUIET_MODE=${QUIET_MODE:-0}
+
 # ---------- Print Functions ----------
 
 print_header() {
+  [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   clear
   echo -e "${BLUE}========================================================${NC}"
   echo -e "${BLUE}              Backupd v${VERSION}${NC}"
@@ -34,6 +38,7 @@ print_header() {
 }
 
 print_disclaimer() {
+  [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   echo -e "${YELLOW}┌────────────────────────────────────────────────────────┐${NC}"
   echo -e "${YELLOW}│                      DISCLAIMER                        │${NC}"
   echo -e "${YELLOW}├────────────────────────────────────────────────────────┤${NC}"
@@ -46,22 +51,27 @@ print_disclaimer() {
 }
 
 print_success() {
+  [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   echo -e "${GREEN}✓ $1${NC}"
 }
 
+# Errors always print (even in quiet mode)
 print_error() {
   echo -e "${RED}✗ $1${NC}" >&2
 }
 
 print_warning() {
+  [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   echo -e "${YELLOW}! $1${NC}"
 }
 
 print_info() {
+  [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   echo -e "${BLUE}→ $1${NC}"
 }
 
 press_enter_to_continue() {
+  [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   echo
   read -p "Press Enter to continue..."
 }

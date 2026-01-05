@@ -250,6 +250,7 @@ show_help() {
   echo "Options:"
   echo "  --help, -h            Show this help message"
   echo "  --version, -v         Show version information"
+  echo "  --quiet, -q           Suppress non-essential output (for scripts/cron)"
   echo "  --update              Check for and install updates"
   echo "  --check-update        Check for updates (no install)"
   echo "  --dev-update          Update from develop branch (testing only)"
@@ -263,6 +264,7 @@ show_help() {
   echo
   echo "Environment variables:"
   echo "  BACKUPD_DEBUG=1       Enable debug logging"
+  echo "  NO_COLOR=1            Disable colored output"
   echo
   echo "Run without arguments to start the interactive menu."
 }
@@ -421,6 +423,17 @@ parse_arguments() {
   # Handle --debug flag first (can be combined with other args)
   if [[ "${1:-}" == "--debug" ]]; then
     DEBUG_ENABLED=1
+    shift
+    # If no more args, continue to menu
+    if [[ -z "${1:-}" ]]; then
+      return 0
+    fi
+  fi
+
+  # Handle --quiet/-q flag (can be combined with other args)
+  if [[ "${1:-}" == "--quiet" ]] || [[ "${1:-}" == "-q" ]]; then
+    QUIET_MODE=1
+    export QUIET_MODE
     shift
     # If no more args, continue to menu
     if [[ -z "${1:-}" ]]; then
