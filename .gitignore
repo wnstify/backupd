@@ -34,7 +34,7 @@ files_backups/
 *.log
 logs/
 *_logfile.log
-
+api-plan.md
 # ----- Temporary Files -----
 *.tmp
 *.temp
