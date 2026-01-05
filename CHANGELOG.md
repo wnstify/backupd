@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.6] - 2026-01-05
+
+### Added
+
+- **CLI Subcommand Dispatcher** - Full command-line interface for non-interactive usage
+  - `backupd backup {db|files|all}` - Run backups from command line
+  - `backupd restore {db|files} [--list]` - Restore or list backups
+  - `backupd status` - Show system status
+  - `backupd verify [--quick|--full]` - Verify backup integrity
+  - `backupd schedule {list|enable|disable}` - Manage schedules
+  - `backupd logs [TYPE] [--lines N]` - View backup logs
+  - Each subcommand has its own `--help` with CLIG-compliant formatting
+
+- **--dry-run Flag** - Preview operations without executing
+  - Works with `backup`, `restore`, `schedule`, and `verify` commands
+  - Shows exactly what would happen without making changes
+  - Uses `[DRY-RUN]` prefix in output for clarity
+
+- **--json Output** - Machine-readable JSON output for automation
+  - `backupd verify --json` returns structured JSON with status, checksums, timestamps
+  - Enables integration with monitoring tools and scripts
+  - Includes error details in JSON format when operations fail
+
+- **--quiet Flag** - Suppress non-essential output for scripts/cron
+  - Only critical errors and final status shown
+  - Perfect for cron jobs and automated pipelines
+
+- **Standardized Exit Codes** - Consistent exit codes across all commands
+  - 0: Success
+  - 1: General error
+  - 2: Configuration error
+  - 3: Insufficient disk space
+  - 64-78: Reserved for specific error categories
+
+- **CLIG-Compliant Help** - Enhanced help formatting for all subcommands
+  - Follows Command Line Interface Guidelines
+  - Consistent structure: Usage, Commands, Options, Examples
+  - Context-aware examples for each subcommand
+
+### Changed
+
+- **Help Output** - Now uses standardized CLIG format with clear sections
+- **Error Messages** - More descriptive with actionable suggestions
+- **Version Output** - Cleaner format with proper exit code
+
+---
+
 ## [2.2.5] - 2025-12-22
 
 ### Fixed
@@ -815,6 +862,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 2.2.6 | 2026-01-05 | CLI subcommands, --dry-run, --json output, CLIG-compliant help |
+| 2.2.5 | 2025-12-22 | Restore extraction fix, SIGPIPE fix, ownership fix |
 | 2.2.0 | 2025-12-21 | Notifications menu, webhook support, menu overhaul, HTTPS enforcement, 8 bug fixes |
 | 2.1.0 | 2025-12-19 | Argon2id encryption, optimized quick verification, monthly reminder system, graceful ntfy handling |
 | 2.0.1 | 2025-12-13 | Branding fixes, lock file names |

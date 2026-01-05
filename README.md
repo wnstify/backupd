@@ -197,7 +197,45 @@ Main Menu
   0. Exit
 ```
 
-### Manual Backup Triggers
+### CLI Subcommands
+
+```bash
+# Backup commands
+sudo backupd backup db              # Backup databases
+sudo backupd backup files           # Backup files
+sudo backupd backup all             # Backup both
+
+# Restore commands
+sudo backupd restore db             # Restore database
+sudo backupd restore files          # Restore files
+sudo backupd restore db --list      # List available backups
+
+# Status and verification
+sudo backupd status                 # Show system status
+sudo backupd verify                 # Quick verification
+sudo backupd verify --full          # Full verification
+
+# Schedule management
+sudo backupd schedule list          # List active schedules
+sudo backupd schedule enable        # Enable schedules
+sudo backupd schedule disable       # Disable schedules
+
+# View logs
+sudo backupd logs                   # View all logs
+sudo backupd logs db --lines 50     # Last 50 lines of db log
+```
+
+### CLI Flags
+
+```bash
+--quiet, -q      # Suppress non-essential output (for scripts/cron)
+--json           # Output in JSON format (for parsing)
+--dry-run, -n    # Preview operations without executing
+--help, -h       # Show help message
+--version, -v    # Show version information
+```
+
+### Manual Backup Triggers (systemd)
 
 ```bash
 # Trigger database backup
