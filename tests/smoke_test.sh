@@ -222,6 +222,81 @@ else
     echo "      Run with sudo to test JSON output"
 fi
 
+# ============================================================================
+# Phase 3: Polish Tests
+# These test --dry-run flag and enhanced JSON output
+# ============================================================================
+
+echo ""
+echo "--- Phase 3: Dry-Run Flag ---"
+
+# Test 19: Main help mentions --dry-run
+help_output=$("$BACKUPD" --help 2>&1) || true
+if echo "$help_output" | grep -qi "dry-run"; then
+    pass "Main help mentions --dry-run"
+else
+    fail "Main help mentions --dry-run" "contains '--dry-run'" "missing"
+fi
+
+# Test 20: backup --help mentions --dry-run
+output=$("$BACKUPD" backup --help 2>&1) || true
+if echo "$output" | grep -qi "dry-run"; then
+    pass "backup --help mentions --dry-run"
+else
+    fail "backup --help mentions --dry-run" "contains '--dry-run'" "missing"
+fi
+
+# Test 21: restore --help mentions --dry-run
+output=$("$BACKUPD" restore --help 2>&1) || true
+if echo "$output" | grep -qi "dry-run"; then
+    pass "restore --help mentions --dry-run"
+else
+    fail "restore --help mentions --dry-run" "contains '--dry-run'" "missing"
+fi
+
+echo ""
+echo "--- Phase 3: Verify JSON ---"
+
+# Test 22: verify --help mentions --json
+output=$("$BACKUPD" verify --help 2>&1) || true
+if echo "$output" | grep -qi "json"; then
+    pass "verify --help mentions --json"
+else
+    fail "verify --help mentions --json" "contains '--json'" "missing"
+fi
+
+# Tests 23-24: JSON output tests require root
+if [[ $EUID -eq 0 ]]; then
+    # Test 23: verify --json produces valid JSON structure
+    output=$("$BACKUPD" verify --json 2>&1) || true
+    if echo "$output" | grep -qE '^\s*\{' && echo "$output" | grep -qE '"results"\s*:'; then
+        pass "verify --json produces JSON with 'results' field"
+    else
+        fail "verify --json produces JSON" "JSON object with results" "$output"
+    fi
+
+    # Test 24: verify --json contains expected fields
+    if echo "$output" | grep -qE '"status"\s*:.*"(PASSED|FAILED|WARNING|SKIPPED)"'; then
+        pass "verify --json contains status field"
+    else
+        fail "verify --json contains status field" "status field" "$output"
+    fi
+else
+    echo "SKIP: verify --json (requires root)"
+    echo "SKIP: verify --json status field (requires root)"
+fi
+
+echo ""
+echo "--- Phase 3: Help Quality ---"
+
+# Test 25: Main help has DESCRIPTION or description section
+help_output=$("$BACKUPD" --help 2>&1) || true
+if echo "$help_output" | grep -qi "comprehensive\|solution\|backup.*restore\|wordpress\|mysql"; then
+    pass "Main help describes the tool"
+else
+    fail "Main help describes the tool" "descriptive text" "missing description"
+fi
+
 # Summary
 echo ""
 echo "================================"
