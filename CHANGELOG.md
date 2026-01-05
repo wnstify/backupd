@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.10] - 2026-01-05
+
+### Fixed
+
+- **Installer Missing Library Files** - `install.sh` now downloads all 16 lib files
+  - Added missing: `lib/exitcodes.sh`, `lib/logging.sh`, `lib/cli.sh`
+  - Same fix applied to installer that was done in v2.2.9 for `--dev-update`
+
+---
+
 ## [2.2.9] - 2026-01-05
 
 ### Fixed

@@ -29,7 +29,9 @@ BIN_LINK="/usr/local/bin/backupd"
 # Library modules to download
 LIB_MODULES=(
     "core.sh"
+    "exitcodes.sh"
     "debug.sh"
+    "logging.sh"
     "crypto.sh"
     "config.sh"
     "generators.sh"
@@ -41,6 +43,7 @@ LIB_MODULES=(
     "setup.sh"
     "updater.sh"
     "notifications.sh"
+    "cli.sh"
 )
 
 # Colors
