@@ -521,6 +521,9 @@ cli_verify() {
       --full|-f)
         full_mode=1
         ;;
+      --json)
+        JSON_OUTPUT=1
+        ;;
       db|database)
         verify_type="db"
         ;;
@@ -559,6 +562,10 @@ cli_verify() {
   [[ -z "$verify_type" ]] && verify_type="both"
 
   if [[ $quick_mode -eq 1 ]]; then
+    if is_json_output; then
+      cli_verify_quick_json "$verify_type"
+      return $?
+    fi
     [[ "${QUIET_MODE:-0}" -ne 1 ]] && echo "Running quick verification..."
     verify_quick "$verify_type"
     return $?
@@ -567,6 +574,134 @@ cli_verify() {
     print_info "Use the interactive menu for full verification: backupd"
     return $EXIT_USAGE
   fi
+}
+
+# JSON output for verify quick command
+cli_verify_quick_json() {
+  local backup_type="$1"
+  local rclone_remote rclone_db_path rclone_files_path
+  rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
+  rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
+  rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
+
+  local db_status="SKIPPED" files_status="SKIPPED"
+  local db_total=0 db_with_checksum=0 db_total_size=0
+  local files_total=0 files_with_checksum=0 files_total_size=0
+  local overall_status="PASSED"
+
+  # Check database backups
+  if [[ "$backup_type" == "db" || "$backup_type" == "both" ]] && [[ -n "$rclone_db_path" ]]; then
+    declare -A checksum_files=()
+    local all_files
+    all_files=$(rclone lsl "$rclone_remote:$rclone_db_path" 2>/dev/null) || true
+
+    # First pass: count checksums
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local filename
+      filename=$(echo "$line" | awk '{print $NF}')
+      if [[ "$filename" == *.sha256 ]]; then
+        checksum_files["$filename"]=1
+      fi
+    done <<< "$all_files"
+
+    # Second pass: count and verify backups
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local size filename
+      size=$(echo "$line" | awk '{print $1}')
+      filename=$(echo "$line" | awk '{print $NF}')
+      if [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
+        ((db_total++)) || true
+        db_total_size=$((db_total_size + size))
+        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
+          ((db_with_checksum++)) || true
+        fi
+      fi
+    done <<< "$all_files"
+
+    if [[ $db_total -eq 0 ]]; then
+      db_status="FAILED"
+      overall_status="FAILED"
+    elif [[ $db_with_checksum -lt $db_total ]]; then
+      db_status="WARNING"
+      [[ "$overall_status" != "FAILED" ]] && overall_status="WARNING"
+    else
+      db_status="PASSED"
+    fi
+  fi
+
+  # Check files backups
+  if [[ "$backup_type" == "files" || "$backup_type" == "both" ]] && [[ -n "$rclone_files_path" ]]; then
+    declare -A checksum_files=()
+    local all_files
+    all_files=$(rclone lsl "$rclone_remote:$rclone_files_path" 2>/dev/null) || true
+
+    # First pass: count checksums
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local filename
+      filename=$(echo "$line" | awk '{print $NF}')
+      if [[ "$filename" == *.sha256 ]]; then
+        checksum_files["$filename"]=1
+      fi
+    done <<< "$all_files"
+
+    # Second pass: count and verify backups
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local size filename
+      size=$(echo "$line" | awk '{print $1}')
+      filename=$(echo "$line" | awk '{print $NF}')
+      if [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
+        ((files_total++)) || true
+        files_total_size=$((files_total_size + size))
+        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
+          ((files_with_checksum++)) || true
+        fi
+      fi
+    done <<< "$all_files"
+
+    if [[ $files_total -eq 0 ]]; then
+      files_status="FAILED"
+      overall_status="FAILED"
+    elif [[ $files_with_checksum -lt $files_total ]]; then
+      files_status="WARNING"
+      [[ "$overall_status" != "FAILED" ]] && overall_status="WARNING"
+    else
+      files_status="PASSED"
+    fi
+  fi
+
+  # Output JSON
+  cat <<EOF
+{
+  "timestamp": "$(date -Iseconds)",
+  "type": "$backup_type",
+  "status": "$overall_status",
+  "results": {
+    "db": {
+      "status": "$db_status",
+      "total": $db_total,
+      "with_checksum": $db_with_checksum,
+      "total_size_bytes": $db_total_size
+    },
+    "files": {
+      "status": "$files_status",
+      "total": $files_total,
+      "with_checksum": $files_with_checksum,
+      "total_size_bytes": $files_total_size
+    }
+  }
+}
+EOF
+
+  # Return appropriate exit code
+  case "$overall_status" in
+    PASSED) return 0 ;;
+    WARNING) return 2 ;;
+    FAILED) return 1 ;;
+  esac
 }
 
 cli_verify_help() {
@@ -583,12 +718,14 @@ Types:
 Options:
   --quick, -q     Quick check: verify checksums exist (default)
   --full, -f      Full test: download and verify (interactive only)
+  --json          Output results in JSON format
   --help, -h      Show this help message
 
 Examples:
   backupd verify                  # Quick check of all backups
   backupd verify db --quick       # Quick check of database backups
   backupd verify files            # Quick check of files backups
+  backupd verify --json           # JSON output for scripting
 EOF
 }
 
