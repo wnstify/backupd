@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.2.6] - 2026-01-05
+## [2.2.7] - 2026-01-05
 
 ### Added
 
@@ -862,7 +862,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 2.2.6 | 2026-01-05 | CLI subcommands, --dry-run, --json output, CLIG-compliant help |
+| 2.2.7 | 2026-01-05 | CLI subcommands, --dry-run, --json output, CLIG-compliant help |
 | 2.2.5 | 2025-12-22 | Restore extraction fix, SIGPIPE fix, ownership fix |
 | 2.2.0 | 2025-12-21 | Notifications menu, webhook support, menu overhaul, HTTPS enforcement, 8 bug fixes |
 | 2.1.0 | 2025-12-19 | Argon2id encryption, optimized quick verification, monthly reminder system, graceful ntfy handling |
