@@ -24,6 +24,7 @@ fi
 
 # CLIG globals for output control
 QUIET_MODE=${QUIET_MODE:-0}
+JSON_OUTPUT=${JSON_OUTPUT:-0}
 
 # ---------- Print Functions ----------
 
@@ -74,6 +75,31 @@ press_enter_to_continue() {
   [[ "${QUIET_MODE:-0}" -eq 1 ]] && return
   echo
   read -p "Press Enter to continue..."
+}
+
+# ---------- JSON Output Functions ----------
+
+# Output JSON object - usage: json_output '{"key": "value"}'
+json_output() {
+  echo "$1"
+}
+
+# Build simple JSON key-value pair - usage: json_kv "key" "value"
+json_kv() {
+  local key="$1"
+  local value="$2"
+  # Escape special characters in value
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '"%s": "%s"' "$key" "$value"
+}
+
+# Check if JSON output mode is enabled
+is_json_output() {
+  [[ "${JSON_OUTPUT:-0}" -eq 1 ]]
 }
 
 # ---------- Input Validation Functions ----------

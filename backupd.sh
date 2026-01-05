@@ -251,6 +251,7 @@ show_help() {
   echo "  --help, -h            Show this help message"
   echo "  --version, -v         Show version information"
   echo "  --quiet, -q           Suppress non-essential output (for scripts/cron)"
+  echo "  --json                Output in JSON format (for parsing)"
   echo "  --update              Check for and install updates"
   echo "  --check-update        Check for updates (no install)"
   echo "  --dev-update          Update from develop branch (testing only)"
@@ -434,6 +435,17 @@ parse_arguments() {
   if [[ "${1:-}" == "--quiet" ]] || [[ "${1:-}" == "-q" ]]; then
     QUIET_MODE=1
     export QUIET_MODE
+    shift
+    # If no more args, continue to menu
+    if [[ -z "${1:-}" ]]; then
+      return 0
+    fi
+  fi
+
+  # Handle --json flag (can be combined with other args)
+  if [[ "${1:-}" == "--json" ]]; then
+    JSON_OUTPUT=1
+    export JSON_OUTPUT
     shift
     # If no more args, continue to menu
     if [[ -z "${1:-}" ]]; then
