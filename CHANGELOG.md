@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.8] - 2026-01-05
+
+### Added
+
+- **Structured Logging System** - Comprehensive logging for troubleshooting and GitHub Issues
+  - Automatic error logging to `/var/log/backupd.log` on every run
+  - Log levels: INFO (default), DEBUG (`--verbose`), TRACE (`-vv`)
+  - Function name, file, line number in every log entry
+  - Automatic stack traces for errors
+  - Session markers with timestamps and version info
+  - `--log-file PATH` - Write logs to custom file
+  - `--verbose` - Increase verbosity (stackable: `-vv` for TRACE)
+  - `--log-export` - Export sanitized log for GitHub issue submission
+
+- **Auto-Redaction of Sensitive Data** - Security-first logging
+  - Passwords, tokens, API keys automatically redacted
+  - Database credentials (`-p'...'`, `--password=...`) sanitized
+  - Home paths (`/home/user/`) replaced with `/home/[USER]/`
+  - Secret directories redacted
+  - SHA256/MD5 hashes replaced with `<SHA256>`/`<HASH32>`
+  - rclone remotes sanitized
+  - Bearer tokens and Authorization headers redacted
+
+- **GitHub Issue Templates** - Streamlined bug reporting
+  - Form-based bug report template with logging instructions
+  - Feature request template with component selection
+  - Links to documentation and debug guide
+  - Pull request template with checklist
+
+- **DEBUG.md** - Comprehensive debugging documentation
+  - Quick start troubleshooting guide
+  - Log locations and formats explained
+  - Auto-redaction patterns documented
+  - Common problems with solutions
+  - Advanced debugging techniques
+
+### Changed
+
+- **Help Output** - Added logging options section with automatic log file info
+- **README.md** - Updated with logging documentation and file structure
+- **USAGE.md** - Added Logging & Debugging section
+
+### Technical
+
+- New module: `lib/logging.sh` (503 lines)
+- Function instrumentation with `log_func_enter` across 11 library files
+- Safe arithmetic operations (`VERBOSE_LEVEL=$((VERBOSE_LEVEL + 1))`) for `set -e` compatibility
+- LOG_FILE preserved when already set before sourcing
+- All scripts pass `bash -n` syntax validation
+
+---
+
 ## [2.2.7] - 2026-01-05
 
 ### Added
@@ -862,6 +914,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 2.2.8 | 2026-01-05 | Structured logging, auto-redaction, GitHub issue templates, DEBUG.md |
 | 2.2.7 | 2026-01-05 | CLI subcommands, --dry-run, --json output, CLIG-compliant help |
 | 2.2.5 | 2025-12-22 | Restore extraction fix, SIGPIPE fix, ownership fix |
 | 2.2.0 | 2025-12-21 | Notifications menu, webhook support, menu overhaul, HTTPS enforcement, 8 bug fixes |
