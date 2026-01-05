@@ -113,3 +113,4 @@ COMPREHENSIVE-TEST-SUMMARY.md
 tests/*
 !tests/smoke_test.sh
 SHA256SUMS
+CLAUDE.md
