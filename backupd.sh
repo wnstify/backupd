@@ -247,6 +247,9 @@ show_help() {
   echo "Backupd v${VERSION}"
   echo "by ${AUTHOR} (${WEBSITE})"
   echo
+  echo "Comprehensive backup and restore solution for WordPress/MySQL servers."
+  echo "Supports database backups, files backups, and remote storage via rclone."
+  echo
   echo "Usage: backupd [COMMAND] [OPTIONS]"
   echo "       backupd [OPTIONS]"
   echo
@@ -265,6 +268,7 @@ show_help() {
   echo "  --version, -v         Show version information"
   echo "  --quiet, -q           Suppress non-essential output (for scripts/cron)"
   echo "  --json                Output in JSON format (for parsing)"
+  echo "  --dry-run, -n         Preview operations without executing"
   echo "  --update              Check for and install updates"
   echo "  --check-update        Check for updates (no install)"
   echo "  --dev-update          Update from develop branch (testing only)"
@@ -275,6 +279,13 @@ show_help() {
   echo "  --debug               Enable debug logging for this session"
   echo "  --debug-status        Show debug log status and location"
   echo "  --debug-export        Export sanitized debug log for sharing"
+  echo
+  echo "Examples:"
+  echo "  backupd backup db              # Backup database now"
+  echo "  backupd backup all --quiet     # Backup everything silently"
+  echo "  backupd restore db --list      # List available DB backups"
+  echo "  backupd verify --dry-run       # Preview verification"
+  echo "  backupd status --json          # Get status as JSON"
   echo
   echo "Environment variables:"
   echo "  BACKUPD_DEBUG=1       Enable debug logging"
@@ -459,6 +470,17 @@ parse_arguments() {
   if [[ "${1:-}" == "--json" ]]; then
     JSON_OUTPUT=1
     export JSON_OUTPUT
+    shift
+    # If no more args, continue to menu
+    if [[ -z "${1:-}" ]]; then
+      return 0
+    fi
+  fi
+
+  # Handle --dry-run/-n flag (can be combined with other args)
+  if [[ "${1:-}" == "--dry-run" ]] || [[ "${1:-}" == "-n" ]]; then
+    DRY_RUN=1
+    export DRY_RUN
     shift
     # If no more args, continue to menu
     if [[ -z "${1:-}" ]]; then

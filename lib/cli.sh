@@ -52,8 +52,8 @@ cli_backup() {
       ;;
   esac
 
-  # Require root for actual backup operations
-  if [[ $EUID -ne 0 ]]; then
+  # Require root for actual backup operations (not in dry-run)
+  if [[ $EUID -ne 0 ]] && ! is_dry_run; then
     print_error "Backup operations require root privileges."
     return $EXIT_NOPERM
   fi
@@ -67,6 +67,10 @@ cli_backup() {
   case "$backup_type" in
     db|database)
       if [[ -f "$SCRIPTS_DIR/db_backup.sh" ]]; then
+        if is_dry_run; then
+          dry_run_msg "bash $SCRIPTS_DIR/db_backup.sh"
+          return 0
+        fi
         [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting database backup..."
         bash "$SCRIPTS_DIR/db_backup.sh"
         return $?
@@ -77,6 +81,10 @@ cli_backup() {
       ;;
     files)
       if [[ -f "$SCRIPTS_DIR/files_backup.sh" ]]; then
+        if is_dry_run; then
+          dry_run_msg "bash $SCRIPTS_DIR/files_backup.sh"
+          return 0
+        fi
         [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting files backup..."
         bash "$SCRIPTS_DIR/files_backup.sh"
         return $?
@@ -89,16 +97,24 @@ cli_backup() {
       local exit_code=0
 
       if [[ -f "$SCRIPTS_DIR/db_backup.sh" ]]; then
-        [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting database backup..."
-        bash "$SCRIPTS_DIR/db_backup.sh" || exit_code=$?
+        if is_dry_run; then
+          dry_run_msg "bash $SCRIPTS_DIR/db_backup.sh"
+        else
+          [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting database backup..."
+          bash "$SCRIPTS_DIR/db_backup.sh" || exit_code=$?
+        fi
       else
         print_error "Database backup script not found."
         exit_code=$EXIT_NOINPUT
       fi
 
       if [[ -f "$SCRIPTS_DIR/files_backup.sh" ]]; then
-        [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting files backup..."
-        bash "$SCRIPTS_DIR/files_backup.sh" || exit_code=$?
+        if is_dry_run; then
+          dry_run_msg "bash $SCRIPTS_DIR/files_backup.sh"
+        else
+          [[ "${QUIET_MODE:-0}" -ne 1 ]] && print_info "Starting files backup..."
+          bash "$SCRIPTS_DIR/files_backup.sh" || exit_code=$?
+        fi
       else
         print_error "Files backup script not found."
         exit_code=$EXIT_NOINPUT
@@ -116,7 +132,7 @@ cli_backup() {
 
 cli_backup_help() {
   cat <<EOF
-Usage: backupd backup {db|files|all}
+Usage: backupd backup {db|files|all} [OPTIONS]
 
 Run backup operations non-interactively.
 
@@ -126,13 +142,15 @@ Subcommands:
   all, both       Run both database and files backup
 
 Options:
+  --dry-run, -n   Preview what would be executed without running
   --help, -h      Show this help message
 
 Examples:
-  backupd backup db
-  backupd backup files
-  backupd backup all
-  backupd --quiet backup db    # Silent mode for cron
+  backupd backup db              # Backup database now
+  backupd backup files           # Backup files now
+  backupd backup all             # Backup both
+  backupd backup db --dry-run    # Preview database backup
+  backupd --quiet backup db      # Silent mode for cron
 EOF
 }
 
@@ -168,8 +186,8 @@ cli_restore() {
       ;;
   esac
 
-  # Require root for actual operations
-  if [[ $EUID -ne 0 ]]; then
+  # Require root for actual operations (not in dry-run or list mode)
+  if [[ $EUID -ne 0 ]] && ! is_dry_run && [[ $list_only -eq 0 ]]; then
     print_error "Restore operations require root privileges."
     return $EXIT_NOPERM
   fi
@@ -187,6 +205,10 @@ cli_restore() {
         return $?
       fi
       if [[ -f "$SCRIPTS_DIR/db_restore.sh" ]]; then
+        if is_dry_run; then
+          dry_run_msg "bash $SCRIPTS_DIR/db_restore.sh"
+          return 0
+        fi
         bash "$SCRIPTS_DIR/db_restore.sh"
         return $?
       else
@@ -200,6 +222,10 @@ cli_restore() {
         return $?
       fi
       if [[ -f "$SCRIPTS_DIR/files_restore.sh" ]]; then
+        if is_dry_run; then
+          dry_run_msg "bash $SCRIPTS_DIR/files_restore.sh"
+          return 0
+        fi
         bash "$SCRIPTS_DIR/files_restore.sh"
         return $?
       else
@@ -271,12 +297,14 @@ Subcommands:
 
 Options:
   --list, -l      List available backups without restoring
+  --dry-run, -n   Preview what would be executed without running
   --help, -h      Show this help message
 
 Examples:
   backupd restore db --list      # List available database backups
   backupd restore files --list   # List available files backups
   backupd restore db             # Interactive database restore
+  backupd restore db --dry-run   # Preview restore operation
   backupd --json restore db -l   # JSON list of backups
 EOF
 }

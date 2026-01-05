@@ -25,6 +25,7 @@ fi
 # CLIG globals for output control
 QUIET_MODE=${QUIET_MODE:-0}
 JSON_OUTPUT=${JSON_OUTPUT:-0}
+DRY_RUN=${DRY_RUN:-0}
 
 # ---------- Print Functions ----------
 
@@ -100,6 +101,19 @@ json_kv() {
 # Check if JSON output mode is enabled
 is_json_output() {
   [[ "${JSON_OUTPUT:-0}" -eq 1 ]]
+}
+
+# ---------- Dry-Run Functions ----------
+
+# Check if dry-run mode is enabled
+is_dry_run() {
+  [[ "${DRY_RUN:-0}" -eq 1 ]]
+}
+
+# Print dry-run message - shows what would be executed
+dry_run_msg() {
+  local action="$1"
+  echo -e "${CYAN}[DRY-RUN]${NC} Would execute: $action"
 }
 
 # ---------- Input Validation Functions ----------
