@@ -1703,3 +1703,29 @@ FULLVERIFYEOF
 
   chmod +x "$SCRIPTS_DIR/verify_full_backup.sh"
 }
+
+# ---------- Wrapper for legacy function name ----------
+# Called by setup.sh, schedule.sh, notifications.sh without parameters
+# Uses global config variables from the sourced config
+
+generate_verify_script() {
+  # Load config if not already loaded
+  [[ -z "${SECRETS_DIR:-}" ]] && source "$INSTALL_DIR/backupd.conf" 2>/dev/null || true
+
+  # Call the restic verify script generator with config values
+  # This generates BOTH verify_backup.sh (quick) and verify_full_backup.sh (full)
+  generate_restic_verify_script \
+    "${SECRETS_DIR:-}" \
+    "${RCLONE_REMOTE:-}" \
+    "${RCLONE_DB_PATH:-}" \
+    "${RCLONE_FILES_PATH:-}"
+}
+
+# Wrapper for full verify script (same function generates both scripts)
+generate_full_verify_script() {
+  # generate_restic_verify_script creates both quick and full scripts
+  # Only regenerate if the full script doesn't exist
+  if [[ ! -f "$SCRIPTS_DIR/verify_full_backup.sh" ]]; then
+    generate_verify_script
+  fi
+}
