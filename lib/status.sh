@@ -119,16 +119,31 @@ show_status() {
   # Check recent backups
   echo
   echo "Recent Backup Activity:"
+  local found_activity=0
+
   if [[ -f "$INSTALL_DIR/logs/db_logfile.log" ]]; then
     local last_db_backup
-    last_db_backup=$(grep "START per-db backup" "$INSTALL_DIR/logs/db_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}')
-    [[ -n "$last_db_backup" ]] && echo "  Last DB backup: $last_db_backup"
+    # v3.0 uses "START restic db backup", legacy used "START per-db backup"
+    last_db_backup=$(grep -E "START (restic db|per-db) backup" "$INSTALL_DIR/logs/db_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}' || true)
+    if [[ -n "$last_db_backup" ]]; then
+      echo "  Last DB backup: $last_db_backup"
+      found_activity=1
+    fi
   fi
 
   if [[ -f "$INSTALL_DIR/logs/files_logfile.log" ]]; then
     local last_files_backup
-    last_files_backup=$(grep "START files backup" "$INSTALL_DIR/logs/files_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}')
-    [[ -n "$last_files_backup" ]] && echo "  Last Files backup: $last_files_backup"
+    # v3.0 uses "START restic files backup", legacy used "START files backup"
+    last_files_backup=$(grep -E "START (restic )?files backup" "$INSTALL_DIR/logs/files_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}' || true)
+    if [[ -n "$last_files_backup" ]]; then
+      echo "  Last Files backup: $last_files_backup"
+      found_activity=1
+    fi
+  fi
+
+  # Show message if no recent activity found
+  if [[ "$found_activity" -eq 0 ]]; then
+    echo "  No backup activity recorded yet"
   fi
 
   echo
