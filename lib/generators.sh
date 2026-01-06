@@ -1194,9 +1194,13 @@ restore_files_menu() {
   echo
   print_info "Snapshot contents:"
   local snapshot_paths
-  snapshot_paths="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$FILES_REPO" ls "$snapshot_id" --json 2>/dev/null | grep -o '"path":"[^"]*"' | cut -d'"' -f4 | head -20)"
-  echo "$snapshot_paths" | head -10
-  echo "..."
+  snapshot_paths="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$FILES_REPO" ls "$snapshot_id" --json 2>/dev/null | grep -o '"path":"[^"]*"' | cut -d'"' -f4 | head -20 || true)"
+  if [[ -n "$snapshot_paths" ]]; then
+    echo "$snapshot_paths" | head -10
+    echo "..."
+  else
+    print_warning "Could not list snapshot contents (snapshot may still be valid)"
+  fi
   echo
 
   echo "Restore options:"
