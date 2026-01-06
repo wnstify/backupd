@@ -180,7 +180,7 @@ sudo backupd
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
-║                    Backupd v2.2.0                         ║
+║                    Backupd v2.2.11                        ║
 ║                       by Backupd                          ║
 ╚═══════════════════════════════════════════════════════════╝
 
@@ -610,7 +610,7 @@ You'll be asked whether to keep or remove configuration and secrets.
 
 ## License
 
-MIT License — see [LICENSE.md](LICENSE.md)
+MIT License — see [LICENSE](LICENSE)
 
 ---
 

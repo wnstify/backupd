@@ -49,14 +49,18 @@ debug_init() {
     fi
   fi
 
-  # Write session header
+  # Write session header (redact sensitive args if function available)
+  local redacted_args="$*"
+  if type redact_cmdline_args &>/dev/null 2>&1; then
+    redacted_args="$(redact_cmdline_args "$*")"
+  fi
   {
     echo ""
     echo "============================================================"
     echo "DEBUG SESSION: $DEBUG_SESSION_ID"
     echo "Started: $(date -Iseconds 2>/dev/null || date)"
     echo "Version: ${VERSION:-unknown}"
-    echo "Command: $0 $*"
+    echo "Command: $0 $redacted_args"
     echo "============================================================"
   } >> "$DEBUG_LOG_FILE" 2>/dev/null || true
 
@@ -124,6 +128,8 @@ debug_sanitize() {
   [[ -z "$input" ]] && return 0
 
   echo "$input" | sed -E \
+    -e 's/(--passphrase)[= ]+[^ ]+/\1 [REDACTED]/g' \
+    -e 's/(BACKUPD_PASSPHRASE=)[^ ]+/\1[REDACTED]/g' \
     -e 's/(password|passwd|pass|token|secret|key|apikey|api_key|credential|auth)[=:]["'"'"']?[^"'"'"' ]*/\1=[REDACTED]/gi' \
     -e 's/\/etc\/\.[a-zA-Z0-9]{8,}[^/]*/\/etc\/[SECRET_DIR]/g' \
     -e 's/(machine-id|machine_id)[=:][^ ]*/\1=[REDACTED]/gi' \

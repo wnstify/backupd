@@ -390,6 +390,7 @@ This tool is designed with security in mind but is provided "as is". Users are r
 
 | Version | Security Changes |
 |---------|-----------------|
+| 2.2.11 | Passphrase redaction in logs (--passphrase VALUE and BACKUPD_PASSPHRASE=value now sanitized before logging) |
 | 2.2.0 | HTTPS enforcement for all notification URLs (ntfy + webhook), webhook notifications with optional Bearer auth, enhanced reconfigure warning |
 | 2.1.0 | Argon2id encryption, required checksums, HTTPS-only, verified rclone install, strong password requirements (12+ chars, 2+ special), graceful ntfy handling, optimized quick verification |
 | 1.5.0 | Secure update system with SHA256 checksum verification of releases |

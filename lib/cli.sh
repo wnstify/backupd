@@ -48,7 +48,7 @@ run_backup_script() {
 cli_dispatch() {
   log_func_enter
   debug_enter "cli_dispatch" "$@"
-  log_info "CLI dispatch: $*"
+  log_info "CLI dispatch: $(redact_cmdline_args "$*")"
   local subcommand="${1:-}"
   shift || true
 
@@ -85,6 +85,7 @@ cli_backup() {
   log_func_enter
   debug_enter "cli_backup" "$@"
   local backup_type="${1:-}"
+  shift || true
 
   case "$backup_type" in
     --help|-h|"")
@@ -92,6 +93,45 @@ cli_backup() {
       return 0
       ;;
   esac
+
+  # Parse remaining arguments (global flags that appear after subcommand)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run|-n)
+        DRY_RUN=1
+        export DRY_RUN
+        ;;
+      --json)
+        JSON_OUTPUT=1
+        export JSON_OUTPUT
+        ;;
+      --quiet|-q)
+        QUIET_MODE=1
+        export QUIET_MODE
+        ;;
+      --job-id)
+        if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+          JOB_ID="$2"
+          export JOB_ID
+          shift
+        fi
+        ;;
+      --job-id=*)
+        JOB_ID="${1#--job-id=}"
+        export JOB_ID
+        ;;
+      --help|-h)
+        cli_backup_help
+        return 0
+        ;;
+      *)
+        print_error "Unknown option: $1"
+        cli_backup_help
+        return $EXIT_USAGE
+        ;;
+    esac
+    shift
+  done
 
   # Require root for actual backup operations (not in dry-run)
   if [[ $EUID -ne 0 ]] && ! is_dry_run; then
@@ -185,9 +225,11 @@ Subcommands:
 
 Options:
   --dry-run, -n   Preview what would be executed without running
+  --json          Output in JSON format
+  --job-id ID     Job ID for progress tracking (used by API)
   --help, -h      Show this help message
 
-Global Options:
+Global Options (can appear before OR after 'backup'):
   --quiet, -q     Suppress non-essential output (ideal for cron)
   --debug         Enable debug logging
 
@@ -195,8 +237,10 @@ Examples:
   backupd backup db              # Backup database now
   backupd backup files           # Backup files now
   backupd backup all             # Backup both
-  backupd backup db --dry-run    # Preview database backup
-  backupd --quiet backup db      # Silent mode for cron
+  backupd --dry-run backup db    # Preview database backup (preferred)
+  backupd backup db --dry-run    # Also works (flag after subcommand)
+  backupd --quiet backup db      # Silent mode for cron (preferred)
+  backupd backup db --quiet      # Also works (flag after subcommand)
 
 See also: restore, verify, schedule, status
 EOF
@@ -207,21 +251,53 @@ EOF
 cli_restore() {
   local restore_type="${1:-}"
   local list_only=0
+  local backup_id="${BACKUP_ID:-}"
+  local job_id="${JOB_ID:-}"
   shift || true
 
-  # Parse flags
+  # Parse flags (including global flags that appear after subcommand)
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --list|-l)
         list_only=1
+        ;;
+      --backup-id)
+        backup_id="$2"
+        shift
+        ;;
+      --backup-id=*)
+        backup_id="${1#--backup-id=}"
+        ;;
+      --job-id)
+        job_id="$2"
+        shift
+        ;;
+      --job-id=*)
+        job_id="${1#--job-id=}"
+        ;;
+      --dry-run|-n)
+        DRY_RUN=1
+        export DRY_RUN
+        ;;
+      --json)
+        JSON_OUTPUT=1
+        export JSON_OUTPUT
+        ;;
+      --quiet|-q)
+        QUIET_MODE=1
+        export QUIET_MODE
         ;;
       --help|-h)
         cli_restore_help
         return 0
         ;;
       *)
-        print_error "Unknown option: $1"
-        return $EXIT_USAGE
+        if [[ "$1" != -* ]]; then
+          : # Let it fall through
+        else
+          print_error "Unknown option: $1"
+          return $EXIT_USAGE
+        fi
         ;;
     esac
     shift
@@ -257,6 +333,8 @@ cli_restore() {
           dry_run_msg "bash $SCRIPTS_DIR/db_restore.sh"
           return 0
         fi
+        [[ -n "$job_id" ]] && export JOB_ID="$job_id"
+        [[ -n "$backup_id" ]] && export BACKUP_ID="$backup_id"
         bash "$SCRIPTS_DIR/db_restore.sh"
         return $?
       else
@@ -274,6 +352,8 @@ cli_restore() {
           dry_run_msg "bash $SCRIPTS_DIR/files_restore.sh"
           return 0
         fi
+        [[ -n "$job_id" ]] && export JOB_ID="$job_id"
+        [[ -n "$backup_id" ]] && export BACKUP_ID="$backup_id"
         bash "$SCRIPTS_DIR/files_restore.sh"
         return $?
       else
@@ -345,20 +425,25 @@ Subcommands:
   files           Restore files backup (extracts archive to original location)
 
 Options:
-  --list, -l      List available backups without restoring
-  --dry-run, -n   Preview what would be executed without running
-  --help, -h      Show this help message
+  --list, -l        List available backups without restoring
+  --backup-id ID    Backup file to restore (non-interactive mode)
+  --job-id ID       Job ID for progress tracking (used by API)
+  --dry-run, -n     Preview what would be executed without running
+  --help, -h        Show this help message
 
-Global Options:
-  --json          Output backup list in JSON format (with --list)
-  --quiet, -q     Suppress non-essential output
+Global Options (can appear before OR after 'restore'):
+  --json            Output backup list in JSON format (with --list)
+  --quiet, -q       Suppress non-essential output
 
 Examples:
-  backupd restore db --list      # List available database backups
-  backupd restore files --list   # List available files backups
-  backupd restore db             # Interactive database restore
-  backupd restore db --dry-run   # Preview restore operation
-  backupd --json restore db -l   # JSON list of backups
+  backupd restore db --list               # List available database backups
+  backupd restore files --list            # List available files backups
+  backupd restore db                      # Interactive database restore
+  backupd --dry-run restore db            # Preview restore (preferred)
+  backupd restore db --dry-run            # Also works (flag after subcommand)
+  backupd --json restore db --list        # JSON list of backups (preferred)
+  backupd restore db --list --json        # Also works (flag after subcommand)
+  backupd restore db --backup-id file.gpg # Non-interactive restore
 
 See also: backup, verify, status
 EOF
@@ -573,8 +658,10 @@ cli_verify() {
   local verify_type=""
   local quick_mode=0
   local full_mode=0
+  local passphrase="${BACKUPD_PASSPHRASE:-}"
+  local job_id="${JOB_ID:-}"
 
-  # Parse arguments
+  # Parse arguments (including global flags that appear after subcommand)
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --quick|-q)
@@ -585,6 +672,36 @@ cli_verify() {
         ;;
       --json)
         JSON_OUTPUT=1
+        export JSON_OUTPUT
+        ;;
+      --passphrase)
+        passphrase="$2"
+        shift
+        ;;
+      --passphrase=*)
+        passphrase="${1#--passphrase=}"
+        ;;
+      --dry-run|-n)
+        DRY_RUN=1
+        export DRY_RUN
+        ;;
+      --quiet)
+        # Note: -q means --quick for verify, use --quiet for quiet mode
+        QUIET_MODE=1
+        export QUIET_MODE
+        ;;
+      --job-id)
+        if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+          job_id="$2"
+          JOB_ID="$job_id"
+          export JOB_ID
+          shift
+        fi
+        ;;
+      --job-id=*)
+        job_id="${1#--job-id=}"
+        JOB_ID="$job_id"
+        export JOB_ID
         ;;
       db|database)
         verify_type="db"
@@ -623,6 +740,16 @@ cli_verify() {
   [[ $quick_mode -eq 0 && $full_mode -eq 0 ]] && quick_mode=1
   [[ -z "$verify_type" ]] && verify_type="both"
 
+  # Handle dry-run mode
+  if is_dry_run; then
+    if [[ $quick_mode -eq 1 ]]; then
+      dry_run_msg "verify_quick $verify_type (check checksums exist in remote storage)"
+    else
+      dry_run_msg "verify_full $verify_type (download, decrypt, and verify latest backups)"
+    fi
+    return 0
+  fi
+
   if [[ $quick_mode -eq 1 ]]; then
     if is_json_output; then
       cli_verify_quick_json "$verify_type"
@@ -632,9 +759,25 @@ cli_verify() {
     verify_quick "$verify_type"
     return $?
   elif [[ $full_mode -eq 1 ]]; then
-    print_warning "Full verification requires interactive password entry."
-    print_info "Use the interactive menu for full verification: backupd"
-    return $EXIT_USAGE
+    # Get passphrase interactively if not provided
+    if [[ -z "$passphrase" ]]; then
+      echo "Full verification requires the backup encryption passphrase."
+      read -sp "Enter encryption passphrase: " passphrase
+      echo
+    fi
+
+    if [[ -z "$passphrase" ]]; then
+      print_error "No passphrase provided."
+      return $EXIT_NOINPUT
+    fi
+
+    if is_json_output; then
+      cli_verify_full_json "$verify_type" "$passphrase"
+    else
+      [[ "${QUIET_MODE:-0}" -ne 1 ]] && echo "Running full verification..."
+      cli_verify_full "$verify_type" "$passphrase"
+    fi
+    return $?
   fi
 }
 
@@ -766,6 +909,182 @@ EOF
   esac
 }
 
+# Full verification - download, decrypt, and verify
+cli_verify_full() {
+  local backup_type="$1"
+  local passphrase="$2"
+  local rclone_remote rclone_db_path rclone_files_path
+  local temp_dir overall_status="PASSED"
+
+  rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
+  rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
+  rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
+
+  temp_dir="$(mktemp -d)"
+  trap "rm -rf '$temp_dir'" RETURN
+
+  # Verify database backups
+  if [[ "$backup_type" == "db" || "$backup_type" == "both" ]] && [[ -n "$rclone_db_path" ]]; then
+    echo "Verifying database backups..."
+    local latest_db
+    latest_db=$(rclone lsf "$rclone_remote:$rclone_db_path" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null | sort -r | head -1)
+
+    if [[ -n "$latest_db" ]]; then
+      echo "  Testing: $latest_db"
+      if rclone copy "$rclone_remote:$rclone_db_path/$latest_db" "$temp_dir/" 2>/dev/null; then
+        if gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
+          print_success "  Database backup verified: $latest_db"
+        else
+          print_error "  Database backup decryption failed: $latest_db"
+          overall_status="FAILED"
+        fi
+      else
+        print_error "  Failed to download: $latest_db"
+        overall_status="FAILED"
+      fi
+      rm -f "$temp_dir/$latest_db"
+    else
+      print_warning "  No database backups found"
+      [[ "$overall_status" != "FAILED" ]] && overall_status="WARNING"
+    fi
+  fi
+
+  # Verify files backups
+  if [[ "$backup_type" == "files" || "$backup_type" == "both" ]] && [[ -n "$rclone_files_path" ]]; then
+    echo "Verifying files backups..."
+    local latest_files
+    latest_files=$(rclone lsf "$rclone_remote:$rclone_files_path" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r | head -1)
+
+    if [[ -n "$latest_files" ]]; then
+      echo "  Testing: $latest_files"
+      if rclone copy "$rclone_remote:$rclone_files_path/$latest_files" "$temp_dir/" 2>/dev/null; then
+        if tar -tzf "$temp_dir/$latest_files" >/dev/null 2>&1; then
+          print_success "  Files backup verified: $latest_files"
+        else
+          print_error "  Files backup corrupted: $latest_files"
+          overall_status="FAILED"
+        fi
+      else
+        print_error "  Failed to download: $latest_files"
+        overall_status="FAILED"
+      fi
+      rm -f "$temp_dir/$latest_files"
+    else
+      print_warning "  No files backups found"
+      [[ "$overall_status" != "FAILED" ]] && overall_status="WARNING"
+    fi
+  fi
+
+  echo
+  case "$overall_status" in
+    PASSED) print_success "Full verification: PASSED" ;;
+    WARNING) print_warning "Full verification: WARNING" ;;
+    FAILED) print_error "Full verification: FAILED" ;;
+  esac
+
+  case "$overall_status" in
+    PASSED) return 0 ;;
+    WARNING) return 2 ;;
+    FAILED) return 1 ;;
+  esac
+}
+
+# JSON output for full verification
+cli_verify_full_json() {
+  local backup_type="$1"
+  local passphrase="$2"
+  local rclone_remote rclone_db_path rclone_files_path
+  local temp_dir overall_status="PASSED"
+  local db_status="SKIPPED" db_file="" db_verified="false"
+  local files_status="SKIPPED" files_file="" files_verified="false"
+
+  rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
+  rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
+  rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
+
+  temp_dir="$(mktemp -d)"
+  trap "rm -rf '$temp_dir'" RETURN
+
+  # Verify database backups
+  if [[ "$backup_type" == "db" || "$backup_type" == "both" ]] && [[ -n "$rclone_db_path" ]]; then
+    local latest_db
+    latest_db=$(rclone lsf "$rclone_remote:$rclone_db_path" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null | sort -r | head -1)
+
+    if [[ -n "$latest_db" ]]; then
+      db_file="$latest_db"
+      if rclone copy "$rclone_remote:$rclone_db_path/$latest_db" "$temp_dir/" 2>/dev/null; then
+        if gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
+          db_status="PASSED"
+          db_verified="true"
+        else
+          db_status="FAILED"
+          overall_status="FAILED"
+        fi
+      else
+        db_status="FAILED"
+        overall_status="FAILED"
+      fi
+      rm -f "$temp_dir/$latest_db"
+    else
+      db_status="WARNING"
+      [[ "$overall_status" != "FAILED" ]] && overall_status="WARNING"
+    fi
+  fi
+
+  # Verify files backups
+  if [[ "$backup_type" == "files" || "$backup_type" == "both" ]] && [[ -n "$rclone_files_path" ]]; then
+    local latest_files
+    latest_files=$(rclone lsf "$rclone_remote:$rclone_files_path" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r | head -1)
+
+    if [[ -n "$latest_files" ]]; then
+      files_file="$latest_files"
+      if rclone copy "$rclone_remote:$rclone_files_path/$latest_files" "$temp_dir/" 2>/dev/null; then
+        if tar -tzf "$temp_dir/$latest_files" >/dev/null 2>&1; then
+          files_status="PASSED"
+          files_verified="true"
+        else
+          files_status="FAILED"
+          overall_status="FAILED"
+        fi
+      else
+        files_status="FAILED"
+        overall_status="FAILED"
+      fi
+      rm -f "$temp_dir/$latest_files"
+    else
+      files_status="WARNING"
+      [[ "$overall_status" != "FAILED" ]] && overall_status="WARNING"
+    fi
+  fi
+
+  cat <<EOF
+{
+  "timestamp": "$(date -Iseconds)",
+  "type": "$backup_type",
+  "mode": "full",
+  "status": "$overall_status",
+  "results": {
+    "db": {
+      "status": "$db_status",
+      "file": "$db_file",
+      "decrypted": $db_verified
+    },
+    "files": {
+      "status": "$files_status",
+      "file": "$files_file",
+      "verified": $files_verified
+    }
+  }
+}
+EOF
+
+  case "$overall_status" in
+    PASSED) return 0 ;;
+    WARNING) return 2 ;;
+    FAILED) return 1 ;;
+  esac
+}
+
 cli_verify_help() {
   cat <<EOF
 Usage: backupd verify [TYPE] [OPTIONS]
@@ -779,10 +1098,16 @@ Types:
   all, both       Verify both (default)
 
 Options:
-  --quick, -q     Quick check: verify checksums exist (default)
-  --full, -f      Full test: download and verify (interactive only)
-  --json          Output results in JSON format
-  --help, -h      Show this help message
+  --quick, -q           Quick check: verify checksums exist (default)
+  --full, -f            Full test: download, decrypt, and verify
+  --passphrase PASS     Encryption passphrase for --full mode (non-interactive)
+  --dry-run, -n         Preview what would be verified without running
+  --job-id ID           Job ID for progress tracking (used by API)
+  --json                Output results in JSON format
+  --help, -h            Show this help message
+
+Global Options (can appear before OR after 'verify'):
+  --quiet               Suppress non-essential output (note: -q means --quick)
 
 Exit Codes:
   0               All checks passed
@@ -790,11 +1115,16 @@ Exit Codes:
   2               Warnings (missing checksums)
 
 Examples:
-  backupd verify                  # Quick check of all backups
-  backupd verify db --quick       # Quick check of database backups
-  backupd verify files            # Quick check of files backups
-  backupd verify --json           # JSON output for scripting
-  backupd verify --json | jq .status  # Get overall status
+  backupd verify                              # Quick check of all backups
+  backupd verify db --quick                   # Quick check of database backups
+  backupd verify files                        # Quick check of files backups
+  backupd --dry-run verify                    # Preview verification (preferred)
+  backupd verify --dry-run                    # Also works (flag after subcommand)
+  backupd --json verify                       # JSON output for scripting (preferred)
+  backupd verify --json                       # Also works (flag after subcommand)
+  backupd verify --json | jq .status          # Get overall status
+  backupd verify --full --passphrase "pass"   # Full verification (non-interactive)
+  BACKUPD_PASSPHRASE=x backupd verify --full  # Full verify via env var
 
 See also: backup, restore, status
 EOF
@@ -1094,6 +1424,9 @@ cli_logs() {
         lines="$2"
         shift
         ;;
+      --json)
+        JSON_OUTPUT=1
+        ;;
       db|database)
         log_type="db"
         ;;
@@ -1126,6 +1459,12 @@ cli_logs() {
   if [[ ! -d "$log_dir" ]]; then
     print_error "Log directory not found: $log_dir"
     return $EXIT_NOINPUT
+  fi
+
+  # Route to JSON or text output
+  if is_json_output; then
+    cli_logs_json "$log_type" "$lines"
+    return $?
   fi
 
   case "$log_type" in
@@ -1194,6 +1533,7 @@ Types:
 
 Options:
   --lines N, -n N   Number of lines to show (default: 50)
+  --json            Output in JSON format (for API/scripting)
   --help, -h        Show this help message
 
 Global Options:
@@ -1204,7 +1544,86 @@ Examples:
   backupd logs db             # Show database backup log
   backupd logs files -n 100   # Show last 100 lines of files log
   backupd logs verify         # Show verification log
+  backupd logs db --json      # JSON output for API integration
 
 See also: status, verify, backup
 EOF
+}
+
+# JSON output for logs command
+cli_logs_json() {
+  local log_type="$1"
+  local lines="$2"
+  local log_dir="$INSTALL_DIR/logs"
+  local log_file=""
+  local type_name=""
+
+  # Determine log file based on type
+  case "$log_type" in
+    db|database)
+      log_file="$log_dir/db_logfile.log"
+      type_name="database"
+      ;;
+    files)
+      log_file="$log_dir/files_logfile.log"
+      type_name="files"
+      ;;
+    verify)
+      log_file="$log_dir/verify_logfile.log"
+      type_name="verify"
+      ;;
+    all)
+      type_name="all"
+      ;;
+  esac
+
+  echo "{"
+  echo "  \"type\": \"$type_name\","
+  echo "  \"lines\": $lines,"
+  echo "  \"entries\": ["
+
+  local first=1
+  local parse_logs
+
+  if [[ "$log_type" == "all" ]]; then
+    parse_logs=$(cat "$log_dir"/*.log 2>/dev/null | sort -t' ' -k1,2 | tail -n "$lines")
+  else
+    [[ ! -f "$log_file" ]] && { echo "  ]"; echo "}"; return 0; }
+    parse_logs=$(tail -n "$lines" "$log_file")
+  fi
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+
+    local timestamp="" level="info" message=""
+
+    if [[ "$line" =~ ^====\ ([0-9]{4}-[0-9]{2}-[0-9]{2})\ ([0-9]{2}:[0-9]{2}:[0-9]{2})\ (START|END) ]]; then
+      timestamp="${BASH_REMATCH[1]}T${BASH_REMATCH[2]}Z"
+      level="info"
+      message="${line//\"/\\\"}"
+    elif [[ "$line" =~ ^\[([A-Z]+)\]\ (.*)$ ]]; then
+      level="${BASH_REMATCH[1],,}"  # Convert to lowercase
+      message="${BASH_REMATCH[2]//\"/\\\"}"
+      timestamp="$(date -Iseconds)"
+    elif [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})\ ([0-9]{2}:[0-9]{2}:[0-9]{2})\ (.*)$ ]]; then
+      timestamp="${BASH_REMATCH[1]}T${BASH_REMATCH[2]}Z"
+      message="${BASH_REMATCH[3]//\"/\\\"}"
+    else
+      message="${line//\"/\\\"}"
+      timestamp="$(date -Iseconds)"
+    fi
+
+    message="${message//\\/\\\\}"
+    message="${message//$'\n'/\\n}"
+    message="${message//$'\r'/\\r}"
+    message="${message//$'\t'/\\t}"
+
+    [[ $first -eq 0 ]] && echo ","
+    echo -n "    {\"timestamp\": \"$timestamp\", \"level\": \"$level\", \"message\": \"$message\"}"
+    first=0
+  done <<< "$parse_logs"
+
+  echo
+  echo "  ]"
+  echo "}"
 }

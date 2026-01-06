@@ -15,7 +15,7 @@
 # ============================================================================
 set -euo pipefail
 
-VERSION="2.2.10"
+VERSION="2.2.11"
 AUTHOR="Backupd"
 WEBSITE="https://backupd.io"
 INSTALL_DIR="/etc/backupd"
@@ -273,6 +273,9 @@ show_help() {
   echo "  --update              Check for and install updates"
   echo "  --check-update        Check for updates (no install)"
   echo "  --dev-update          Update from develop branch (testing only)"
+  echo "  --job-id ID           Set job tracking ID (for API integration)"
+  echo "  --backup-id ID        Specify backup file for restore (non-interactive)"
+  echo "  --passphrase PASS     Provide passphrase non-interactively"
   echo "  --migrate-encryption  Upgrade encryption to best available algorithm"
   echo "  --encryption-status   Show current encryption algorithm status"
   echo
@@ -286,10 +289,13 @@ show_help() {
   echo
   echo "Examples:"
   echo "  backupd backup db              # Backup database now"
-  echo "  backupd backup all --quiet     # Backup everything silently"
+  echo "  backupd --quiet backup all     # Backup everything silently (preferred)"
+  echo "  backupd backup all --quiet     # Also works (flag after subcommand)"
   echo "  backupd restore db --list      # List available DB backups"
-  echo "  backupd verify --dry-run       # Preview verification"
-  echo "  backupd status --json          # Get status as JSON"
+  echo "  backupd --dry-run verify       # Preview verification (preferred)"
+  echo "  backupd verify --dry-run       # Also works (flag after subcommand)"
+  echo "  backupd --json status          # Get status as JSON (preferred)"
+  echo "  backupd status --json          # Also works (flag after subcommand)"
   echo "  backupd --verbose backup all   # Verbose output with debug logs"
   echo "  backupd --log-export           # Export log for GitHub issue"
   echo
@@ -297,6 +303,9 @@ show_help() {
   echo "  BACKUPD_LOG_FILE=path Override default log file location"
   echo "  BACKUPD_DEBUG=1       Enable legacy debug logging"
   echo "  NO_COLOR=1            Disable colored output"
+  echo "  JOB_ID=id             Job tracking ID for API integration"
+  echo "  BACKUP_ID=id          Backup file ID for non-interactive restore"
+  echo "  BACKUPD_PASSPHRASE=x  Passphrase for non-interactive operations (recommended)"
   echo
   echo "Run without arguments to start the interactive menu."
 }
@@ -474,6 +483,33 @@ parse_arguments() {
         export DRY_RUN
         shift
         ;;
+      --job-id)
+        if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+          echo "Error: --job-id requires an ID argument"
+          exit $EXIT_USAGE
+        fi
+        JOB_ID="$2"
+        export JOB_ID
+        shift 2
+        ;;
+      --backup-id)
+        if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+          echo "Error: --backup-id requires an ID argument"
+          exit $EXIT_USAGE
+        fi
+        BACKUP_ID="$2"
+        export BACKUP_ID
+        shift 2
+        ;;
+      --passphrase)
+        if [[ -z "${2:-}" ]]; then
+          echo "Error: --passphrase requires a value"
+          exit $EXIT_USAGE
+        fi
+        BACKUPD_PASSPHRASE="$2"
+        export BACKUPD_PASSPHRASE
+        shift 2
+        ;;
       --log-file)
         if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
           echo "Error: --log-file requires a path argument"
@@ -632,6 +668,12 @@ log_info "Backupd $VERSION starting (PID: $$)"
 # Create install directory if needed
 mkdir -p "$INSTALL_DIR"
 debug_trace "Install directory: $INSTALL_DIR"
+
+# Create progress directory for API integration (volatile, recreated on boot)
+if [[ ! -d /var/run/backupd ]]; then
+  mkdir -p /var/run/backupd 2>/dev/null || true
+  chmod 755 /var/run/backupd 2>/dev/null || true
+fi
 
 # Install command if not already installed
 if [[ ! -L "/usr/local/bin/backupd" ]]; then

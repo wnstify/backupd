@@ -315,6 +315,19 @@ download_scripts() {
     mkdir -p "${INSTALL_DIR}/logs"
     mkdir -p "${INSTALL_DIR}/lib"
 
+    # Create runtime directory for API progress tracking (volatile)
+    mkdir -p /var/run/backupd
+    chmod 755 /var/run/backupd
+
+    # Create tmpfiles.d configuration for runtime directory persistence across reboots
+    if [[ -d /etc/tmpfiles.d ]]; then
+      cat > /etc/tmpfiles.d/backupd.conf << 'TMPEOF'
+# Backupd runtime directory for progress tracking
+# Created by backupd installer
+d /var/run/backupd 0755 root root -
+TMPEOF
+    fi
+
     # Download main script
     local script_url="${GITHUB_RAW}/${SCRIPT_NAME}"
     local target_path="${INSTALL_DIR}/${SCRIPT_NAME}"
@@ -591,6 +604,12 @@ uninstall() {
     rm -f /etc/systemd/system/backupd-verify-full.service
     rm -f /etc/systemd/system/backupd-verify-full.timer
     systemctl daemon-reload 2>/dev/null || true
+
+    # Remove runtime directory
+    rm -rf /var/run/backupd
+
+    # Remove tmpfiles.d configuration
+    rm -f /etc/tmpfiles.d/backupd.conf
 
     # Step 5: Remove symlink
     rm -f "$BIN_LINK"

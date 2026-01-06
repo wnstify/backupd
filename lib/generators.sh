@@ -147,6 +147,35 @@ SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
 SECRET_WEBHOOK_TOKEN=".c7"
 
+# Progress tracking for API
+PROGRESS_DIR="/var/run/backupd"
+JOB_ID="${JOB_ID:-backup-db-$(date +%s)}"
+PROGRESS_FILE="$PROGRESS_DIR/$JOB_ID.progress"
+STARTED_AT="$(date -Iseconds)"
+
+mkdir -p "$PROGRESS_DIR" 2>/dev/null || true
+chmod 755 "$PROGRESS_DIR" 2>/dev/null || true
+
+write_progress() {
+  local phase="$1" percent="$2" message="$3" status="${4:-running}"
+  cat > "$PROGRESS_FILE" << PROGRESSEOF
+{
+  "job_id": "$JOB_ID",
+  "type": "backup",
+  "subtype": "database",
+  "status": "$status",
+  "phase": "$phase",
+  "percent": $percent,
+  "message": "$message",
+  "started_at": "$STARTED_AT",
+  "updated_at": "$(date -Iseconds)"
+}
+PROGRESSEOF
+  chmod 644 "$PROGRESS_FILE" 2>/dev/null || true
+}
+
+write_progress "initializing" 0 "Starting database backup"
+
 # Cleanup function
 TEMP_DIR=""
 MYSQL_AUTH_FILE=""
@@ -194,6 +223,7 @@ rotate_log "$LOG"
 touch "$LOG" && chmod 600 "$LOG"
 exec > >(tee -a "$LOG") 2>&1
 echo "==== $(date +%F' '%T) START per-db backup ===="
+write_progress "starting" 5 "Checking prerequisites"
 
 # Check disk space (need at least 1GB free in temp)
 AVAIL_MB=$(df -m /tmp 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
@@ -341,8 +371,11 @@ mkdir -p "$DEST"
 
 declare -a failures=()
 db_count=0
+total_dbs=$(echo "$DBS" | wc -w)
+write_progress "dumping" 10 "Dumping $total_dbs databases"
 for db in $DBS; do
   echo "  -> Dumping: $db"
+  write_progress "dumping" $((10 + (db_count * 40 / total_dbs))) "Dumping: $db"
   if "$DB_DUMP" "${MYSQL_ARGS[@]}" --databases "$db" --single-transaction --quick \
       --routines --events --triggers --hex-blob --default-character-set=utf8mb4 \
       2>/dev/null | $COMPRESSOR > "$DEST/${db}-${STAMP}.sql.gz"; then
@@ -363,6 +396,7 @@ fi
 # Archive + encrypt
 ARCHIVE="$TEMP_DIR/${HOSTNAME}-db_backups-${STAMP}.tar.gz.gpg"
 echo "Creating encrypted archive..."
+write_progress "archiving" 50 "Creating encrypted archive"
 tar -C "$TEMP_DIR" -cf - "$STAMP" | $COMPRESSOR | \
   gpg --batch --yes --pinentry-mode=loopback --passphrase "$PASSPHRASE" --symmetric --cipher-algo AES256 -o "$ARCHIVE"
 
@@ -383,6 +417,7 @@ echo "Checksum: $(cat "$CHECKSUM_FILE")"
 
 # Upload with timeout and retry
 echo "Uploading to remote storage..."
+write_progress "uploading" 60 "Uploading to remote storage"
 RCLONE_TIMEOUT=1800  # 30 minutes
 if ! timeout $RCLONE_TIMEOUT rclone copy "$ARCHIVE" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 --low-level-retries 10; then
   echo "[ERROR] Upload failed"
@@ -401,10 +436,12 @@ if ! timeout 60 rclone check "$(dirname "$ARCHIVE")" "$RCLONE_REMOTE:$RCLONE_PAT
 fi
 
 echo "Uploaded to $RCLONE_REMOTE:$RCLONE_PATH"
+write_progress "uploading" 80 "Upload complete"
 
 # Retention cleanup
 if [[ "$RETENTION_MINUTES" -gt 0 ]]; then
   echo "Running retention cleanup (keeping backups newer than $RETENTION_MINUTES minutes)..."
+  write_progress "cleanup" 85 "Running retention cleanup"
   cleanup_count=0
   cleanup_errors=0
   cutoff_time=$(date -d "-$RETENTION_MINUTES minutes" +%s 2>/dev/null || date -v-${RETENTION_MINUTES}M +%s 2>/dev/null || echo 0)
@@ -449,10 +486,12 @@ fi
 
 if ((${#failures[@]})); then
   send_notification "DB Backup Completed with Errors on $HOSTNAME" "Backed up: $db_count, Failed: ${failures[*]}" "backup_warning"
+  write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
   send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up" "backup_complete"
+  write_progress "complete" 100 "Backup completed successfully" "completed"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
 DBBACKUPEOF
@@ -567,14 +606,33 @@ while IFS= read -r f; do [[ -n "$f" ]] && ALL_BACKUPS+=("$f"); done <<< "$remote
 echo "$LOG_PREFIX Found ${#ALL_BACKUPS[@]} backup(s)."
 [[ ${#ALL_BACKUPS[@]} -eq 0 ]] && { echo "$LOG_PREFIX No backups found."; exit 1; }
 
-echo
-for i in "${!ALL_BACKUPS[@]}"; do
-  printf "  %2d) %s\n" "$((i+1))" "${ALL_BACKUPS[$i]}"
-done
-echo
-read -p "Select backup [1-${#ALL_BACKUPS[@]}]: " sel
-[[ ! "$sel" =~ ^[0-9]+$ ]] && exit 1
-SELECTED="${ALL_BACKUPS[$((sel-1))]}"
+# Non-interactive mode: if BACKUP_ID is set, skip selection
+if [[ -n "\${BACKUP_ID:-}" ]]; then
+  SELECTED=""
+  for backup in "\${ALL_BACKUPS[@]}"; do
+    if [[ "\$backup" == "\$BACKUP_ID" ]]; then
+      SELECTED="\$backup"
+      break
+    fi
+  done
+  if [[ -z "\$SELECTED" ]]; then
+    echo "\$LOG_PREFIX ERROR: Specified backup not found: \$BACKUP_ID"
+    echo "\$LOG_PREFIX Available backups:"
+    printf '  %s\\n' "\${ALL_BACKUPS[@]}"
+    exit 1
+  fi
+  echo "\$LOG_PREFIX Using specified backup: \$SELECTED"
+else
+  # Interactive mode - show selection menu
+  echo
+  for i in "\${!ALL_BACKUPS[@]}"; do
+    printf "  %2d) %s\\n" "\$((i+1))" "\${ALL_BACKUPS[\$i]}"
+  done
+  echo
+  read -p "Select backup [1-\${#ALL_BACKUPS[@]}]: " sel
+  [[ ! "\$sel" =~ ^[0-9]+\$ ]] && exit 1
+  SELECTED="\${ALL_BACKUPS[\$((sel-1))]}"
+fi
 
 echo
 echo "$LOG_PREFIX Downloading $SELECTED..."
@@ -792,6 +850,35 @@ SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
 SECRET_WEBHOOK_TOKEN=".c7"
 
+# Progress tracking for API
+PROGRESS_DIR="/var/run/backupd"
+JOB_ID="${JOB_ID:-backup-files-$(date +%s)}"
+PROGRESS_FILE="$PROGRESS_DIR/$JOB_ID.progress"
+STARTED_AT="$(date -Iseconds)"
+
+mkdir -p "$PROGRESS_DIR" 2>/dev/null || true
+chmod 755 "$PROGRESS_DIR" 2>/dev/null || true
+
+write_progress() {
+  local phase="$1" percent="$2" message="$3" status="${4:-running}"
+  cat > "$PROGRESS_FILE" << PROGRESSEOF
+{
+  "job_id": "$JOB_ID",
+  "type": "backup",
+  "subtype": "files",
+  "status": "$status",
+  "phase": "$phase",
+  "percent": $percent,
+  "message": "$message",
+  "started_at": "$STARTED_AT",
+  "updated_at": "$(date -Iseconds)"
+}
+PROGRESSEOF
+  chmod 644 "$PROGRESS_FILE" 2>/dev/null || true
+}
+
+write_progress "initializing" 0 "Starting files backup"
+
 # Cleanup function
 TEMP_DIR=""
 cleanup() {
@@ -836,6 +923,7 @@ rotate_log "$LOG"
 touch "$LOG" && chmod 600 "$LOG"
 exec > >(tee -a "$LOG") 2>&1
 echo "==== $(date +%F' '%T) START files backup ===="
+write_progress "starting" 5 "Checking prerequisites"
 
 # Check disk space (need at least 2GB free in temp)
 AVAIL_MB=$(df -m /tmp 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
@@ -1004,6 +1092,8 @@ fi
 declare -a failures=()
 success_count=0
 site_count=0
+total_sites=${#site_dirs[@]}
+write_progress "scanning" 10 "Found $total_sites site directories"
 
 for site_path in "${site_dirs[@]}"; do
   [[ ! -d "$site_path" ]] && continue
@@ -1039,6 +1129,7 @@ for site_path in "${site_dirs[@]}"; do
   archive_path="$TEMP_DIR/${base_name}-${STAMP}.tar.gz"
 
   echo "$LOG_PREFIX [$site_name] Archiving ($site_url)..."
+  write_progress "archiving" $((10 + (site_count * 80 / total_sites))) "Archiving: $site_name"
 
   # Archive CONTENTS of webroot (not the directory itself)
   # This allows restore to extract INTO existing webroot without replacing it
@@ -1138,10 +1229,12 @@ fi
 
 if [[ ${#failures[@]} -gt 0 ]]; then
   send_notification "Files Backup Errors on $HOSTNAME" "Success: $success_count, Failed: ${failures[*]}" "backup_warning"
+  write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
   send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up" "backup_complete"
+  write_progress "complete" 100 "Backup completed successfully" "completed"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
 FILESBACKUPEOF

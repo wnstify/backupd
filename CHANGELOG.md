@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.11] - 2026-01-06
+
+### Added
+
+- **REST API Support Flags** - New CLI flags for API and GUI integration
+  - `--job-id ID` - Pass job tracking ID for API progress monitoring
+  - `--backup-id ID` - Specify backup ID for non-interactive restore operations
+  - `--passphrase PASS` - Provide encryption passphrase for non-interactive `verify --full`
+  - `logs --json` - Structured JSON output from log files for parsing
+
+- **Progress File Tracking** - Real-time progress tracking at `/var/run/backupd/`
+  - Progress files written during backup/restore operations
+  - JSON format with percentage, current operation, and timestamps
+  - Directory created by installer with `tmpfiles.d` for reboot persistence
+
+### Fixed
+
+- **Global Flags Position** - `--dry-run` and `--json` now work both before AND after subcommand
+  - Previously: `backupd --json backup db` failed
+  - Now works: `backupd --json backup db` AND `backupd backup db --json`
+
+### Changed
+
+- **Help Text Updated** - All subcommand help text updated with new options and examples
+- **Install Script** - Adds `/var/run/backupd/` directory and `tmpfiles.d` configuration
+- **Uninstall Script** - Properly cleans up progress directory and `tmpfiles.d` config
+
+### Security
+
+- **Passphrase Redaction in Logs** - Fixed `--passphrase VALUE` being logged in plain text
+  - Added `redact_cmdline_args()` function to sanitize command lines before logging
+  - Fixed in: `lib/logging.sh`, `lib/cli.sh`, `lib/debug.sh`
+  - Also redacts `BACKUPD_PASSPHRASE=value` environment variable patterns
+
+### Environment Variables
+
+New environment variables supported for non-interactive operation:
+- `JOB_ID` - Alternative to `--job-id` flag
+- `BACKUP_ID` - Alternative to `--backup-id` flag
+- `BACKUPD_PASSPHRASE` - Alternative to `--passphrase` flag
+
+---
+
 ## [2.2.10] - 2026-01-05
 
 ### Fixed
@@ -953,6 +996,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 2.2.11 | 2026-01-06 | REST API support flags, progress file tracking, global flags fix, passphrase redaction |
+| 2.2.10 | 2026-01-05 | Installer missing library files fix |
+| 2.2.9 | 2026-01-05 | Error logging, backup script error capture, dev-update file list |
 | 2.2.8 | 2026-01-05 | Structured logging, auto-redaction, GitHub issue templates, DEBUG.md |
 | 2.2.7 | 2026-01-05 | CLI subcommands, --dry-run, --json output, CLIG-compliant help |
 | 2.2.5 | 2025-12-22 | Restore extraction fix, SIGPIPE fix, ownership fix |

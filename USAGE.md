@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v2.2.10** by Backupd.
+Complete usage documentation for **Backupd v2.2.11** by Backupd.
 
 ## Table of Contents
 
@@ -17,6 +17,7 @@ Complete usage documentation for **Backupd v2.2.10** by Backupd.
 - [Notifications](#notifications)
 - [Updating the Tool](#updating-the-tool)
 - [Command Line Usage](#command-line-usage)
+- [API and GUI Integration](#api-and-gui-integration)
 - [Logging & Debugging](#logging--debugging)
 - [Advanced Configuration](#advanced-configuration)
 - [Best Practices](#best-practices)
@@ -77,7 +78,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v2.2.0
+              Backupd v2.2.11
                     by Backupd
 ========================================================
 
@@ -109,7 +110,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-              Backupd v2.2.0
+              Backupd v2.2.11
                     by Backupd
 ========================================================
 
@@ -1323,6 +1324,113 @@ Logs are automatically rotated when they exceed 10MB:
 - Current log: `db_logfile.log`
 - Rotated logs: `db_logfile.log.1`, `db_logfile.log.2`, ... up to `.5`
 - Oldest logs are automatically deleted
+
+### API and GUI Integration
+
+Backupd v2.2.11 adds flags for integration with REST APIs and GUI applications.
+
+#### New CLI Flags
+
+```bash
+# Job tracking ID for API progress monitoring
+backupd --job-id "job-12345" backup db
+
+# Non-interactive restore with specific backup ID
+backupd restore db --backup-id "myserver-db_backups-2025-01-15-0300"
+
+# Non-interactive full verification with passphrase
+backupd verify --full --passphrase "your-encryption-password"
+
+# Structured JSON output from logs
+backupd logs db --json
+backupd logs files --json --lines 100
+```
+
+#### Progress File Tracking
+
+During backup and restore operations, progress is written to `/var/run/backupd/`:
+
+```bash
+# Progress file location
+/var/run/backupd/{job-id}.progress
+
+# Example content (JSON format)
+{
+  "job_id": "job-12345",
+  "operation": "backup",
+  "type": "db",
+  "status": "running",
+  "percentage": 45,
+  "current": "Dumping: myapp_production",
+  "started_at": "2025-01-15T03:00:00Z",
+  "updated_at": "2025-01-15T03:00:15Z"
+}
+```
+
+**Note:** The `/var/run/backupd/` directory is volatile (cleared on reboot). The installer creates a `tmpfiles.d` configuration to recreate it on boot.
+
+#### Environment Variables
+
+For non-interactive operation, flags can also be set via environment variables:
+
+| Variable | Equivalent Flag | Description |
+|----------|-----------------|-------------|
+| `JOB_ID` | `--job-id` | Job tracking identifier |
+| `BACKUP_ID` | `--backup-id` | Backup identifier for restore |
+| `BACKUPD_PASSPHRASE` | `--passphrase` | Encryption passphrase |
+
+```bash
+# Example: Using environment variables
+export JOB_ID="api-job-789"
+export BACKUPD_PASSPHRASE="my-encryption-password"
+backupd verify --full
+
+# Or inline
+JOB_ID="api-job-789" backupd backup db
+```
+
+#### JSON Log Output
+
+The `logs --json` flag outputs structured JSON for parsing:
+
+```bash
+# Get last 50 database log entries as JSON
+backupd logs db --json --lines 50
+```
+
+Output format:
+```json
+{
+  "log_type": "db",
+  "entries": [
+    {
+      "timestamp": "2025-01-15T03:00:01Z",
+      "level": "INFO",
+      "message": "START per-db backup"
+    },
+    {
+      "timestamp": "2025-01-15T03:00:45Z",
+      "level": "INFO",
+      "message": "END (success)"
+    }
+  ],
+  "total_entries": 50
+}
+```
+
+#### Global Flags Position
+
+Global flags (`--dry-run`, `--json`, `--verbose`) now work both before and after the subcommand:
+
+```bash
+# Both of these work identically:
+backupd --json backup db
+backupd backup db --json
+
+# Combining multiple flags:
+backupd --dry-run --verbose backup all
+backupd backup all --dry-run --verbose
+```
 
 ---
 

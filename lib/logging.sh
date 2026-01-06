@@ -75,7 +75,7 @@ log_init() {
       echo "LOG SESSION: $LOG_SESSION_ID"
       echo "Started: $(date -Iseconds 2>/dev/null || date)"
       echo "Version: ${VERSION:-unknown}"
-      echo "Command: $0 $*"
+      echo "Command: $0 $(redact_cmdline_args "$*")"
       echo "Log Level: $(_log_level_name "$LOG_LEVEL")"
       echo "================================================================================"
     } >> "$LOG_FILE" 2>/dev/null || true
@@ -101,6 +101,26 @@ log_end() {
 }
 
 # ---------- Comprehensive Redaction ----------
+
+# Redact command-line arguments containing sensitive values
+# This handles patterns like: --passphrase VALUE where VALUE is a separate argument
+# CRITICAL: Must be used for any logging of command-line arguments
+redact_cmdline_args() {
+  local input="$*"
+  [[ -z "$input" ]] && return 0
+
+  # Redact --passphrase VALUE (value as separate argument after flag)
+  # Handles: --passphrase VALUE, --passphrase=VALUE
+  input=$(echo "$input" | sed -E 's/(--passphrase)[= ]+[^ ]+/\1 [REDACTED]/g')
+
+  # Redact BACKUPD_PASSPHRASE=value in arguments
+  input=$(echo "$input" | sed -E 's/(BACKUPD_PASSPHRASE=)[^ ]+/\1[REDACTED]/g')
+
+  # Redact -p VALUE patterns (short form password flags)
+  input=$(echo "$input" | sed -E "s/(-p)[= ]+[^ ]+/\1 [REDACTED]/g")
+
+  echo "$input"
+}
 
 # Redact sensitive data from strings
 # This is CRITICAL for security - prevents credential leakage in logs
