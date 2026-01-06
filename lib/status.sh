@@ -42,9 +42,8 @@ show_status() {
   [[ -f "$SCRIPTS_DIR/files_backup.sh" ]] && print_success "Files backup script" || print_error "Files backup script"
 
   echo
-  echo "Restore Scripts:"
-  [[ -f "$SCRIPTS_DIR/db_restore.sh" ]] && print_success "Database restore script" || print_error "Database restore script"
-  [[ -f "$SCRIPTS_DIR/files_restore.sh" ]] && print_success "Files restore script" || print_error "Files restore script"
+  echo "Restore Script:"
+  [[ -f "$SCRIPTS_DIR/restore.sh" ]] && print_success "Unified restore script" || print_error "Restore script (run setup to generate)"
 
   # Check scheduled backups (systemd timers or cron)
   echo
