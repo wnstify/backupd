@@ -94,7 +94,7 @@ IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS, OR BACKUPD BE LIABLE FOR ANY C
 - Is designed for **Linux servers** with **MySQL/MariaDB** database environments
 - Supports web applications (WordPress, Laravel, Node.js, PHP, static sites, etc.)
 - Requires **root access** and proper system configuration
-- Depends on **third-party tools** (rclone, gpg, mysql/mariadb, etc.)
+- Depends on **third-party tools** (rclone, restic, mysql/mariadb, etc.)
 - May not be compatible with all server configurations
 - Is provided for **general use cases** and may not suit specific needs
 
@@ -133,7 +133,7 @@ This software relies on third-party tools and services:
 | Dependency | Responsibility |
 |------------|---------------|
 | rclone | The rclone project |
-| GPG | GNU Privacy Guard project |
+| restic | The restic project |
 | MySQL/MariaDB | Oracle/MariaDB Foundation |
 | OpenSSL | OpenSSL project |
 | ntfy.sh | ntfy project |

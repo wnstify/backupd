@@ -152,7 +152,7 @@ User: root
 ================================================================================
 LOG SESSION: 20250115-030001-12345
 Started: 2025-01-15T03:00:01+00:00
-Version: 2.2.11
+Version: 3.0.0
 Command: /usr/local/bin/backupd backup db
 Log Level: INFO
 ================================================================================
@@ -282,7 +282,7 @@ OS: Ubuntu 24.04 LTS
 Kernel: 6.8.0-90-generic
 Arch: x86_64
 Bash: 5.2.21(1)-release
-Backupd: 2.2.11
+Backupd: 3.0.0
 
 openssl: OpenSSL 3.0.13
 restic: restic 0.17.3
