@@ -4,12 +4,89 @@
 # Backup execution and cleanup functions
 # ============================================================================
 
+# ---------- Check Running Backups ----------
+
+# Display any currently running backup jobs with progress
+show_running_backups() {
+  local progress_dir="/var/run/backupd"
+  local found_running=false
+
+  [[ ! -d "$progress_dir" ]] && return 0
+
+  for progress_file in "$progress_dir"/*.progress; do
+    [[ ! -f "$progress_file" ]] && continue
+
+    # Read progress file (JSON format)
+    local status percent message subtype updated_at
+    status=$(grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' "$progress_file" 2>/dev/null | cut -d'"' -f4)
+
+    # Skip if not running
+    [[ "$status" != "running" ]] && continue
+
+    percent=$(grep -o '"percent"[[:space:]]*:[[:space:]]*[0-9]*' "$progress_file" 2>/dev/null | grep -o '[0-9]*$')
+    message=$(grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' "$progress_file" 2>/dev/null | cut -d'"' -f4)
+    subtype=$(grep -o '"subtype"[[:space:]]*:[[:space:]]*"[^"]*"' "$progress_file" 2>/dev/null | cut -d'"' -f4)
+    updated_at=$(grep -o '"updated_at"[[:space:]]*:[[:space:]]*"[^"]*"' "$progress_file" 2>/dev/null | cut -d'"' -f4)
+
+    # Skip stale entries (older than 1 hour) - likely orphaned from failed backups
+    if [[ -n "$updated_at" ]]; then
+      local now updated_epoch
+      now=$(date +%s)
+      updated_epoch=$(date -d "$updated_at" +%s 2>/dev/null || echo 0)
+      if [[ $((now - updated_epoch)) -gt 3600 ]]; then
+        continue
+      fi
+    fi
+
+    found_running=true
+
+    # Format display
+    local type_label
+    case "$subtype" in
+      database) type_label="Database" ;;
+      files) type_label="Files" ;;
+      *) type_label="Backup" ;;
+    esac
+
+    echo -e "${YELLOW}>>> $type_label backup RUNNING: ${percent:-0}% - ${message:-working}${NC}"
+    if [[ -n "$updated_at" ]]; then
+      echo -e "${YELLOW}    Last update: $updated_at${NC}"
+    fi
+    echo
+  done
+
+  # Also check for lock files as a fallback
+  if [[ "$found_running" == "false" ]]; then
+    if [[ -f "/var/lock/backupd-db.lock" ]]; then
+      if ! flock -n 200 200>/var/lock/backupd-db.lock 2>/dev/null; then
+        echo -e "${YELLOW}>>> Database backup is running (no progress info available)${NC}"
+        echo
+        found_running=true
+      fi
+    fi
+
+    if [[ -f "/var/lock/backupd-files.lock" ]]; then
+      if ! flock -n 200 200>/var/lock/backupd-files.lock 2>/dev/null; then
+        echo -e "${YELLOW}>>> Files backup is running (no progress info available)${NC}"
+        echo
+        found_running=true
+      fi
+    fi
+  fi
+
+  [[ "$found_running" == "true" ]] && return 0 || return 1
+}
+
 # ---------- Run Backup ----------
 
 run_backup() {
   log_func_enter
   debug_enter "run_backup"
   print_header
+
+  # Show any running backups with progress (ignore return code - not an error if none running)
+  show_running_backups || true
+
   echo "Run Backup"
   echo "=========="
   echo

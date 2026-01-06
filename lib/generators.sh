@@ -128,6 +128,10 @@ write_progress "initializing" 0 "Starting database backup"
 MYSQL_AUTH_FILE=""
 cleanup() {
   local exit_code=$?
+  # Update progress to failed if exiting with error
+  if [[ $exit_code -ne 0 && -f "$PROGRESS_FILE" ]]; then
+    write_progress "error" 0 "Backup failed (exit code: $exit_code)" "failed"
+  fi
   [[ -n "$MYSQL_AUTH_FILE" && -f "$MYSQL_AUTH_FILE" ]] && rm -f "$MYSQL_AUTH_FILE"
   exit $exit_code
 }
@@ -500,6 +504,10 @@ write_progress "initializing" 0 "Starting files backup"
 # Cleanup function
 cleanup() {
   local exit_code=$?
+  # Update progress to failed if exiting with error
+  if [[ $exit_code -ne 0 && -f "$PROGRESS_FILE" ]]; then
+    write_progress "error" 0 "Backup failed (exit code: $exit_code)" "failed"
+  fi
   exit $exit_code
 }
 trap cleanup EXIT INT TERM
@@ -507,7 +515,7 @@ trap cleanup EXIT INT TERM
 # Acquire lock (fixed location)
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "$LOG_PREFIX Another files backup is running. Exiting."
+  echo "\$LOG_PREFIX Another files backup is running. Exiting."
   exit 0
 fi
 

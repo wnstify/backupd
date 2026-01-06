@@ -172,24 +172,30 @@ view_logs() {
       local db_size
       db_size=$(du -h "$log_dir/db_logfile.log" 2>/dev/null | cut -f1)
       echo "  1. Database backup log ($db_size)"
+      echo "  2. Database backup log (LIVE TAIL)"
     else
       echo -e "  1. Database backup log ${YELLOW}(not found)${NC}"
+      echo -e "  2. Database backup log (LIVE TAIL) ${YELLOW}(not found)${NC}"
     fi
 
     if [[ -f "$log_dir/files_logfile.log" ]]; then
       local files_size
       files_size=$(du -h "$log_dir/files_logfile.log" 2>/dev/null | cut -f1)
-      echo "  2. Files backup log ($files_size)"
+      echo "  3. Files backup log ($files_size)"
+      echo "  4. Files backup log (LIVE TAIL)"
     else
-      echo -e "  2. Files backup log ${YELLOW}(not found)${NC}"
+      echo -e "  3. Files backup log ${YELLOW}(not found)${NC}"
+      echo -e "  4. Files backup log (LIVE TAIL) ${YELLOW}(not found)${NC}"
     fi
 
     if [[ -f "$log_dir/verify_logfile.log" ]]; then
       local verify_size
       verify_size=$(du -h "$log_dir/verify_logfile.log" 2>/dev/null | cut -f1)
-      echo "  3. Verification log ($verify_size)"
+      echo "  5. Verification log ($verify_size)"
+      echo "  6. Verification log (LIVE TAIL)"
     else
-      echo -e "  3. Verification log ${YELLOW}(not found)${NC}"
+      echo -e "  5. Verification log ${YELLOW}(not found)${NC}"
+      echo -e "  6. Verification log (LIVE TAIL) ${YELLOW}(not found)${NC}"
     fi
 
     if [[ -f "$log_dir/notification_failures.log" ]]; then
@@ -197,20 +203,22 @@ view_logs() {
       notif_size=$(du -h "$log_dir/notification_failures.log" 2>/dev/null | cut -f1)
       notif_count=$(wc -l < "$log_dir/notification_failures.log" 2>/dev/null || echo "0")
       if [[ "$notif_count" -gt 0 ]]; then
-        echo -e "  4. Notification failures ${RED}($notif_count entries, $notif_size)${NC}"
+        echo -e "  7. Notification failures ${RED}($notif_count entries, $notif_size)${NC}"
       else
-        echo "  4. Notification failures (empty)"
+        echo "  7. Notification failures (empty)"
       fi
     else
-      echo -e "  4. Notification failures ${YELLOW}(not found)${NC}"
+      echo -e "  7. Notification failures ${YELLOW}(not found)${NC}"
     fi
 
     echo
-    echo "  5. View all logs directory"
-    echo "  6. Clear old logs"
+    echo "  8. View all logs directory"
+    echo "  9. Clear old logs"
     echo "  0. Back to main menu"
     echo
-    read -p "Select option [0-6]: " log_choice
+    echo -e "  ${CYAN}Tip: LIVE TAIL shows new entries as they appear. Press Ctrl+C to stop.${NC}"
+    echo
+    read -p "Select option [0-9]: " log_choice
 
     case "$log_choice" in
       1)
@@ -222,6 +230,17 @@ view_logs() {
         fi
         ;;
       2)
+        if [[ -f "$log_dir/db_logfile.log" ]]; then
+          echo
+          echo -e "${CYAN}Tailing database backup log... Press Ctrl+C to stop.${NC}"
+          echo
+          tail -f "$log_dir/db_logfile.log"
+        else
+          print_error "No database backup log found."
+          press_enter_to_continue
+        fi
+        ;;
+      3)
         if [[ -f "$log_dir/files_logfile.log" ]]; then
           less "$log_dir/files_logfile.log"
         else
@@ -229,7 +248,18 @@ view_logs() {
           press_enter_to_continue
         fi
         ;;
-      3)
+      4)
+        if [[ -f "$log_dir/files_logfile.log" ]]; then
+          echo
+          echo -e "${CYAN}Tailing files backup log... Press Ctrl+C to stop.${NC}"
+          echo
+          tail -f "$log_dir/files_logfile.log"
+        else
+          print_error "No files backup log found."
+          press_enter_to_continue
+        fi
+        ;;
+      5)
         if [[ -f "$log_dir/verify_logfile.log" ]]; then
           less "$log_dir/verify_logfile.log"
         else
@@ -237,7 +267,18 @@ view_logs() {
           press_enter_to_continue
         fi
         ;;
-      4)
+      6)
+        if [[ -f "$log_dir/verify_logfile.log" ]]; then
+          echo
+          echo -e "${CYAN}Tailing verification log... Press Ctrl+C to stop.${NC}"
+          echo
+          tail -f "$log_dir/verify_logfile.log"
+        else
+          print_error "No verification log found."
+          press_enter_to_continue
+        fi
+        ;;
+      7)
         if [[ -f "$log_dir/notification_failures.log" ]]; then
           less "$log_dir/notification_failures.log"
         else
@@ -245,14 +286,14 @@ view_logs() {
           press_enter_to_continue
         fi
         ;;
-      5)
+      8)
         echo
         echo "Log directory: $log_dir"
         echo
         ls -lah "$log_dir" 2>/dev/null || echo "No logs directory found."
         press_enter_to_continue
         ;;
-      6)
+      9)
         clear_old_logs
         ;;
       0|*)

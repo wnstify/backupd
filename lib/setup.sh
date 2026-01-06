@@ -221,21 +221,29 @@ run_setup() {
   echo "It is used by restic to encrypt all backup data."
   echo
   show_password_requirements
-  read -sp "Enter repository password: " ENCRYPTION_PASSWORD
-  echo
-  read -sp "Confirm repository password: " ENCRYPTION_PASSWORD_CONFIRM
-  echo
 
-  if [[ "$ENCRYPTION_PASSWORD" != "$ENCRYPTION_PASSWORD_CONFIRM" ]]; then
-    print_error "Passwords don't match. Please restart setup."
-    press_enter_to_continue
-    return
-  fi
+  local password_valid=false
+  while [[ "$password_valid" == "false" ]]; do
+    read -sp "Enter repository password: " ENCRYPTION_PASSWORD
+    echo
+    read -sp "Confirm repository password: " ENCRYPTION_PASSWORD_CONFIRM
+    echo
 
-  if ! validate_password "$ENCRYPTION_PASSWORD"; then
-    press_enter_to_continue
-    return
-  fi
+    if [[ "$ENCRYPTION_PASSWORD" != "$ENCRYPTION_PASSWORD_CONFIRM" ]]; then
+      print_error "Passwords don't match. Please try again."
+      echo
+      continue
+    fi
+
+    if ! validate_password "$ENCRYPTION_PASSWORD"; then
+      echo
+      echo "Please try again with a password that meets the requirements."
+      echo
+      continue
+    fi
+
+    password_valid=true
+  done
 
   store_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE" "$ENCRYPTION_PASSWORD"
   print_success "Repository password stored securely."
