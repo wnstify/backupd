@@ -64,7 +64,7 @@ This tool provides exactly that.
 - ⏰ **Automated Scheduling** — Systemd timers with automatic retry and catch-up
 - 🧹 **Retention & Cleanup** — Configurable retention policy with automatic old backup deletion
 - ✅ **Integrity Verification** — SHA256 checksums, quick checks (no download), and monthly full test reminders
-- 🔔 **Dual-Channel Notifications** — Optional alerts via ntfy.sh AND/OR custom webhooks on backup events
+- 🔔 **Triple-Channel Notifications** — Optional alerts via ntfy.sh, Pushover, AND/OR custom webhooks on backup events
 - 🔄 **Easy Restore** — Interactive restore wizard with safety backups and checksum verification
 - 📋 **Detailed Logging** — Full logs with timestamps and automatic log rotation
 - 🔄 **Auto-Update** — Built-in update system with version checking and one-click updates
@@ -153,7 +153,9 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 ├── .c4                       # ntfy token (optional)
 ├── .c5                       # ntfy URL (optional)
 ├── .c6                       # webhook URL (optional)
-└── .c7                       # webhook auth token (optional)
+├── .c7                       # webhook auth token (optional)
+├── .c8                       # Pushover user key (optional)
+└── .c9                       # Pushover API token (optional)
 
 /usr/local/bin/backupd            # Symlink for easy access
 
@@ -180,7 +182,7 @@ sudo backupd
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
-║                    Backupd v2.2.11                        ║
+║                    Backupd v2.3.0                         ║
 ║                       by Backupd                          ║
 ╚═══════════════════════════════════════════════════════════╝
 

@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v2.2.11** by Backupd.
+Complete usage documentation for **Backupd v2.3.0** by Backupd.
 
 ## Table of Contents
 
@@ -78,7 +78,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v2.2.11
+              Backupd v2.3.0
                     by Backupd
 ========================================================
 
@@ -110,7 +110,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-              Backupd v2.2.11
+              Backupd v2.3.0
                     by Backupd
 ========================================================
 
@@ -1038,8 +1038,9 @@ Logs are displayed using `less` for easy navigation:
 
 ## Notifications
 
-The tool supports **optional** dual-channel notifications for backup events:
-- **ntfy.sh** - Push notifications to your phone
+The tool supports **optional** triple-channel notifications for backup events:
+- **ntfy.sh** - Push notifications via ntfy.sh service
+- **Pushover** - Push notifications via Pushover.net (iOS/Android/Desktop)
 - **Webhooks** - JSON payloads to any endpoint (Slack, Discord, custom APIs)
 
 **Note:** Notifications are completely optional. All backup, restore, and verification operations work normally without notifications configured.
@@ -1084,6 +1085,63 @@ The tool supports **optional** dual-channel notifications for backup events:
    - For private topics, create an account at ntfy.sh
    - Generate an access token
    - Enter the token during setup
+
+### Setting Up Pushover (Push Notifications)
+
+[Pushover](https://pushover.net) provides reliable push notifications to iOS, Android, and Desktop devices with priority-based alerting.
+
+1. **Create a Pushover account:**
+   - Go to [pushover.net](https://pushover.net) and create an account
+   - Note your **User Key** (30-character alphanumeric)
+
+2. **Create an application:**
+   - Go to [pushover.net/apps/build](https://pushover.net/apps/build)
+   - Create a new application (e.g., "Backupd")
+   - Note your **API Token** (30-character alphanumeric)
+
+3. **Install the Pushover app:**
+   - iOS: [App Store](https://apps.apple.com/app/pushover-notifications/id506088175)
+   - Android: [Google Play](https://play.google.com/store/apps/details?id=net.superblock.pushover)
+   - Desktop: [pushover.net/clients](https://pushover.net/clients)
+
+4. **Configure via interactive menu:**
+   ```
+   sudo backupd → Notifications → Configure Pushover
+   ```
+
+5. **Or configure via CLI:**
+   ```bash
+   sudo backupd notifications set-pushover --user-key YOUR_USER_KEY --api-token YOUR_API_TOKEN
+   sudo backupd notifications test-pushover
+   ```
+
+**Pushover Priority & Sounds:**
+
+Backupd uses smart priority mapping for different events:
+
+| Event Type | Priority | Sound | Behavior |
+|------------|----------|-------|----------|
+| Backup/Verify Failure | 1 (High) | siren/falling | Bypasses quiet hours |
+| Success | 0 (Normal) | magic | Standard notification |
+| Warning | 0 (Normal) | bike | Standard notification |
+| Background/Started | -1 (Low) | none | Silent, no sound |
+
+**CLI Commands:**
+
+```bash
+# Show all notification configurations
+sudo backupd notifications status
+sudo backupd notifications status --json
+
+# Configure Pushover
+sudo backupd notifications set-pushover --user-key KEY --api-token TOKEN
+
+# Test Pushover
+sudo backupd notifications test-pushover
+
+# Disable Pushover
+sudo backupd notifications disable-pushover
+```
 
 ### Setting Up Webhooks (Custom Integrations)
 
@@ -1137,7 +1195,17 @@ Run a manual backup to test notifications:
 sudo backupd  # Select "Run backup now"
 ```
 
-You should receive notifications on all configured channels (ntfy and/or webhook).
+You should receive notifications on all configured channels (ntfy, Pushover, and/or webhook).
+
+**Test individual channels:**
+
+```bash
+# Test all channels at once (via menu)
+sudo backupd → Notifications → Test notifications
+
+# Test Pushover specifically
+sudo backupd notifications test-pushover
+```
 
 ---
 
@@ -1327,7 +1395,7 @@ Logs are automatically rotated when they exceed 10MB:
 
 ### API and GUI Integration
 
-Backupd v2.2.11 adds flags for integration with REST APIs and GUI applications.
+Backupd v2.3.0 adds flags for integration with REST APIs and GUI applications.
 
 #### New CLI Flags
 

@@ -17,6 +17,8 @@ SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
 SECRET_WEBHOOK_TOKEN=".c7"
+SECRET_PUSHOVER_USER=".c8"
+SECRET_PUSHOVER_TOKEN=".c9"
 
 # ---------- Encryption Constants ----------
 
@@ -315,7 +317,7 @@ secret_exists() {
 
 lock_secrets() {
   local secrets_dir="$1"
-  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".algo")
+  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".c8" ".c9" ".algo")
   for f in "${secret_files[@]}"; do
     [[ -f "$secrets_dir/$f" ]] && chattr +i "$secrets_dir/$f" 2>/dev/null || true
   done
@@ -325,7 +327,7 @@ lock_secrets() {
 unlock_secrets() {
   local secrets_dir="$1"
   chattr -i "$secrets_dir" 2>/dev/null || true
-  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".algo")
+  local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".c8" ".c9" ".algo")
   for f in "${secret_files[@]}"; do
     [[ -f "$secrets_dir/$f" ]] && chattr -i "$secrets_dir/$f" 2>/dev/null || true
   done
@@ -338,7 +340,7 @@ migrate_secrets() {
   local secrets_dir="$1"
   local from_version="$2"
   local to_version="$3"
-  local secret_files=(".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7")
+  local secret_files=(".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".c8" ".c9")
   local secrets_data=()
   local failed=0
 

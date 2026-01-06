@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] - 2026-01-06
+
+### Added
+
+- **Pushover Push Notifications** - Third notification channel alongside ntfy and webhooks
+  - Native support for [Pushover](https://pushover.net) push notifications
+  - Configure via interactive menu (Notifications → Configure Pushover)
+  - Configure via CLI: `backupd notifications set-pushover --user-key KEY --api-token TOKEN`
+  - Test notifications: `backupd notifications test-pushover`
+  - Disable: `backupd notifications disable-pushover`
+  - Full CLI status: `backupd notifications status [--json]`
+
+- **Priority-Based Sound Alerts** - Smart notification urgency mapping
+  - **Failures** (priority 1, siren/falling): Bypass quiet hours, immediate alert
+  - **Success** (priority 0, magic): Pleasant confirmation sound
+  - **Warnings** (priority 0, bike): Attention-worthy but not urgent
+  - **Silent/Background** (priority -1, none): No notification sound
+  - Critical failures like backup failures and integrity check failures use high priority to ensure visibility
+
+- **Event-Specific Notification Sounds** - 22 notification events with tailored sounds
+  - Database backup success/failure/warning
+  - Files backup success/failure/warning
+  - Retention cleanup success/warning
+  - Integrity verification passed/failed
+  - Script regeneration notifications
+  - All events mapped to appropriate priority and sound
+
+- **CLI Notifications Subcommand** - Full non-interactive notification management
+  - `backupd notifications status` - Show all notification channel configurations
+  - `backupd notifications status --json` - JSON output for API integration
+  - `backupd notifications set-pushover` - Configure Pushover credentials
+  - `backupd notifications test-pushover` - Send test notification
+  - `backupd notifications disable-pushover` - Remove Pushover configuration
+
+### Changed
+
+- **Notification System Architecture** - Updated `send_notification()` to support 6 parameters
+  - Added `priority` parameter (5th): -2 to 2 (Pushover priority levels)
+  - Added `sound` parameter (6th): Pushover sound name
+  - All 22 notification calls updated with appropriate priority/sound
+  - Backward compatible: existing ntfy and webhook notifications unaffected
+
+- **Script Regeneration** - Enhanced `regenerate_scripts_silent()` function
+  - Now regenerates all 6 scripts (backup + verify) when notification settings change
+  - Ensures Pushover credentials are embedded in all generated scripts
+  - Previously only regenerated backup scripts (4), now includes verify scripts (6)
+
+- **Encrypted Secrets** - Added Pushover credential storage
+  - `.c8` - Pushover user key (encrypted, immutable)
+  - `.c9` - Pushover API token (encrypted, immutable)
+  - Integrated with existing lock/unlock/migrate secret functions
+
+### Technical
+
+- **Modified Files:**
+  - `lib/crypto.sh` - Added `SECRET_PUSHOVER_USER` and `SECRET_PUSHOVER_TOKEN` constants, updated lock/unlock arrays
+  - `lib/notifications.sh` - Added `configure_pushover()`, `test_pushover_notification()`, updated menus and regeneration
+  - `lib/generators.sh` - Added `send_pushover()` function to all 4 script generators, updated 22 notification calls
+  - `lib/cli.sh` - Added notifications subcommand with status, set-pushover, test-pushover, disable-pushover
+  - `backupd.sh` - Added `notifications` to allowed subcommands in dispatch
+
+- **Pushover API Integration:**
+  - Endpoint: `https://api.pushover.net/1/messages.json`
+  - Authentication: 30-character alphanumeric user key + API token
+  - Retry logic: 3 attempts with exponential backoff (2s, 4s, 8s delays)
+  - HTTP timeout: 15 seconds per request
+  - Validates 200 OK response for success
+
+- **Notification Priority Mapping:**
+  | Event Type | Priority | Sound | Behavior |
+  |------------|----------|-------|----------|
+  | Backup/Verify Failure | 1 (High) | siren/falling | Bypasses quiet hours |
+  | Success | 0 (Normal) | magic | Standard notification |
+  | Warning | 0 (Normal) | bike | Standard notification |
+  | Background/Started | -1 (Low) | none | Silent, no sound |
+
+---
+
 ## [2.2.11] - 2026-01-06
 
 ### Added
@@ -996,6 +1074,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 2.3.0 | 2026-01-06 | Pushover notifications, priority-based sound alerts, CLI notifications subcommand |
 | 2.2.11 | 2026-01-06 | REST API support flags, progress file tracking, global flags fix, passphrase redaction |
 | 2.2.10 | 2026-01-05 | Installer missing library files fix |
 | 2.2.9 | 2026-01-05 | Error logging, backup script error capture, dev-update file list |

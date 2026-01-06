@@ -22,19 +22,21 @@ manage_notifications() {
     echo "Options:"
     echo "1. Configure ntfy"
     echo "2. Configure webhook"
-    echo "3. Test notifications"
-    echo "4. View notification failures"
-    echo "5. Disable all notifications"
+    echo "3. Configure Pushover"
+    echo "4. Test notifications"
+    echo "5. View notification failures"
+    echo "6. Disable all notifications"
     echo "0. Back to main menu"
     echo
-    read -p "Select option [0-5]: " notif_choice
+    read -p "Select option [0-6]: " notif_choice
 
     case "$notif_choice" in
       1) configure_ntfy ;;
       2) configure_webhook ;;
-      3) test_notifications ;;
-      4) view_notification_failures ;;
-      5) disable_all_notifications ;;
+      3) configure_pushover ;;
+      4) test_notifications ;;
+      5) view_notification_failures ;;
+      6) disable_all_notifications ;;
       0) return ;;
       *) print_error "Invalid option" ; sleep 1 ;;
     esac
@@ -82,6 +84,20 @@ show_notification_status_brief() {
     fi
   else
     echo -e "  ${YELLOW}Webhook: Not configured${NC}"
+  fi
+
+  # Check Pushover
+  local pushover_user pushover_token
+  pushover_user="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+  if [[ -n "$pushover_user" ]]; then
+    pushover_token="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
+    if [[ -n "$pushover_token" ]]; then
+      print_success "Pushover: Configured (user key + API token)"
+    else
+      echo -e "  ${YELLOW}Pushover: User key set but missing API token${NC}"
+    fi
+  else
+    echo -e "  ${YELLOW}Pushover: Not configured${NC}"
   fi
 
   # Check failure log
@@ -240,6 +256,140 @@ configure_webhook() {
   press_enter_to_continue
 }
 
+# ---------- Configure Pushover ----------
+
+configure_pushover() {
+  print_header
+  echo "Configure Pushover Notifications"
+  echo "================================="
+  echo
+  echo "Pushover sends notifications to iOS/Android devices."
+  echo "Get your credentials at: https://pushover.net"
+  echo
+
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+
+  if [[ -z "$secrets_dir" ]]; then
+    print_error "Secure storage not initialized. Run setup first."
+    press_enter_to_continue
+    return
+  fi
+
+  # Show current config
+  local current_user current_token
+  current_user="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+  current_token="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
+
+  if [[ -n "$current_user" ]]; then
+    echo "Current User Key: ${current_user:0:8}...${current_user: -4} (masked)"
+    [[ -n "$current_token" ]] && echo "API Token: configured" || echo "API Token: not set"
+    echo
+  fi
+
+  echo "Enter your Pushover User Key (or press Enter to keep current):"
+  echo "Found at: https://pushover.net (after login, look for 'Your User Key')"
+  echo
+  read -p "User Key: " new_user
+
+  if [[ -n "$new_user" ]]; then
+    # Validate format (30 alphanumeric characters)
+    if [[ ! "$new_user" =~ ^[A-Za-z0-9]{30}$ ]]; then
+      print_error "Invalid user key format. Must be 30 alphanumeric characters."
+      press_enter_to_continue
+      return
+    fi
+    store_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" "$new_user"
+    print_success "Pushover user key saved"
+  fi
+
+  echo
+  echo "Enter your Pushover API Token (or press Enter to keep current):"
+  echo "Create an application at: https://pushover.net/apps/build"
+  echo
+  read -sp "API Token: " new_token
+  echo
+
+  if [[ -n "$new_token" ]]; then
+    # Validate format (30 alphanumeric characters)
+    if [[ ! "$new_token" =~ ^[A-Za-z0-9]{30}$ ]]; then
+      print_error "Invalid API token format. Must be 30 alphanumeric characters."
+      press_enter_to_continue
+      return
+    fi
+    store_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" "$new_token"
+    print_success "Pushover API token saved"
+  fi
+
+  # Check if both are now configured
+  current_user="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+  current_token="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
+
+  echo
+  if [[ -n "$current_user" && -n "$current_token" ]]; then
+    print_success "Pushover configuration complete"
+
+    # Offer to test
+    echo
+    read -p "Send a test notification now? (Y/n): " test_now
+    if [[ ! "$test_now" =~ ^[Nn]$ ]]; then
+      test_pushover_notification "$current_user" "$current_token"
+    fi
+  else
+    print_warning "Pushover not fully configured. Both user key and API token are required."
+  fi
+
+  # Offer to regenerate scripts
+  if [[ -n "$current_user" && -n "$current_token" ]]; then
+    echo
+    read -p "Regenerate backup scripts with new settings? (Y/n): " regen
+    if [[ ! "$regen" =~ ^[Nn]$ ]]; then
+      regenerate_scripts_silent
+      print_success "Backup scripts regenerated"
+    fi
+  fi
+
+  press_enter_to_continue
+}
+
+# ---------- Test Pushover Notification ----------
+
+test_pushover_notification() {
+  local user_key="$1"
+  local api_token="$2"
+  local hostname timestamp http_code response
+
+  hostname="$(hostname -f 2>/dev/null || hostname)"
+  timestamp="$(date -Iseconds)"
+
+  echo -n "Sending test notification to Pushover... "
+
+  response=$(timeout 15 curl -s -w "\n%{http_code}" \
+    --form-string "token=$api_token" \
+    --form-string "user=$user_key" \
+    --form-string "title=Backupd Test on $hostname" \
+    --form-string "message=Test notification sent at $timestamp" \
+    --form-string "priority=0" \
+    --form-string "sound=pushover" \
+    https://api.pushover.net/1/messages.json 2>/dev/null) || response="000"
+
+  http_code=$(echo "$response" | tail -1)
+  local body=$(echo "$response" | sed '$d')
+
+  if [[ "$http_code" == "200" ]]; then
+    echo -e "${GREEN}OK (HTTP $http_code)${NC}"
+    return 0
+  else
+    echo -e "${RED}FAILED (HTTP $http_code)${NC}"
+    # Try to extract error message
+    if command -v jq &>/dev/null && [[ -n "$body" ]]; then
+      local errors=$(echo "$body" | jq -r '.errors[]?' 2>/dev/null)
+      [[ -n "$errors" ]] && echo "  Error: $errors"
+    fi
+    return 1
+  fi
+}
+
 # ---------- Test Notifications ----------
 
 test_notifications() {
@@ -260,16 +410,18 @@ test_notifications() {
     return
   fi
 
-  local ntfy_url ntfy_token webhook_url webhook_token
+  local ntfy_url ntfy_token webhook_url webhook_token pushover_user pushover_token
   ntfy_url="$(get_secret "$secrets_dir" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
   ntfy_token="$(get_secret "$secrets_dir" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
   webhook_url="$(get_secret "$secrets_dir" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
   webhook_token="$(get_secret "$secrets_dir" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
+  pushover_user="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+  pushover_token="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
 
-  if [[ -z "$ntfy_url" && -z "$webhook_url" ]]; then
+  if [[ -z "$ntfy_url" && -z "$webhook_url" && ( -z "$pushover_user" || -z "$pushover_token" ) ]]; then
     print_warning "No notification channels configured."
     echo
-    echo "Configure ntfy or webhook first."
+    echo "Configure ntfy, webhook, or Pushover first."
     press_enter_to_continue
     return
   fi
@@ -341,8 +493,34 @@ test_notifications() {
     echo "Webhook: not configured (skipped)"
   fi
 
+  # Test Pushover
+  local pushover_ok=0
+  if [[ -n "$pushover_user" && -n "$pushover_token" ]]; then
+    echo -n "Testing Pushover... "
+    local response http_code
+    response=$(timeout 15 curl -s -w "\n%{http_code}" \
+      --form-string "token=$pushover_token" \
+      --form-string "user=$pushover_user" \
+      --form-string "title=Backupd Test on $hostname" \
+      --form-string "message=Test notification sent at $timestamp" \
+      --form-string "priority=0" \
+      --form-string "sound=pushover" \
+      https://api.pushover.net/1/messages.json 2>/dev/null) || response="000"
+
+    http_code=$(echo "$response" | tail -1)
+
+    if [[ "$http_code" == "200" ]]; then
+      echo -e "${GREEN}OK (HTTP $http_code)${NC}"
+      pushover_ok=1
+    else
+      echo -e "${RED}FAILED (HTTP $http_code)${NC}"
+    fi
+  else
+    echo "Pushover: not configured (skipped)"
+  fi
+
   echo
-  if [[ $ntfy_ok -eq 1 || $webhook_ok -eq 1 ]]; then
+  if [[ $ntfy_ok -eq 1 || $webhook_ok -eq 1 || $pushover_ok -eq 1 ]]; then
     print_success "Test complete! Check your notification channels."
   else
     print_error "All notification tests failed. Check your configuration."
@@ -442,6 +620,8 @@ disable_all_notifications() {
     rm -f "$secrets_dir/$SECRET_NTFY_TOKEN" 2>/dev/null
     rm -f "$secrets_dir/$SECRET_WEBHOOK_URL" 2>/dev/null
     rm -f "$secrets_dir/$SECRET_WEBHOOK_TOKEN" 2>/dev/null
+    rm -f "$secrets_dir/$SECRET_PUSHOVER_USER" 2>/dev/null
+    rm -f "$secrets_dir/$SECRET_PUSHOVER_TOKEN" 2>/dev/null
 
     # Regenerate scripts
     regenerate_scripts_silent
@@ -479,5 +659,13 @@ regenerate_scripts_silent() {
     generate_all_scripts "$secrets_dir" "$do_database" "$do_files" "$rclone_remote" \
       "$rclone_db_path" "$rclone_files_path" "${retention_minutes:-43200}" \
       "${web_path_pattern:-/var/www/*}" "${webroot_subdir:-.}" 2>/dev/null
+
+    # Also regenerate verify scripts if they exist
+    if [[ -f "$SCRIPTS_DIR/verify_backup.sh" ]]; then
+      generate_verify_script 2>/dev/null
+    fi
+    if [[ -f "$SCRIPTS_DIR/verify_full_backup.sh" ]]; then
+      generate_full_verify_script 2>/dev/null
+    fi
   fi
 }

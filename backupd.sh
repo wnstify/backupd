@@ -15,7 +15,7 @@
 # ============================================================================
 set -euo pipefail
 
-VERSION="2.2.11"
+VERSION="2.3.0"
 AUTHOR="Backupd"
 WEBSITE="https://backupd.io"
 INSTALL_DIR="/etc/backupd"
@@ -547,7 +547,7 @@ parse_arguments() {
 
   # Check for subcommands first (dispatch to CLI handler)
   case "${1:-}" in
-    backup|restore|status|verify|schedule|logs)
+    backup|restore|status|verify|schedule|logs|notifications)
       # Initialize logging before dispatch (since we exit after)
       log_init "$@"
       trap 'log_end' EXIT

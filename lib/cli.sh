@@ -71,6 +71,9 @@ cli_dispatch() {
     logs)
       cli_logs "$@"
       ;;
+    notifications)
+      cli_notifications "$@"
+      ;;
     *)
       print_error "Unknown command: $subcommand"
       echo "Run 'backupd --help' for usage information."
@@ -1626,4 +1629,278 @@ cli_logs_json() {
   echo
   echo "  ]"
   echo "}"
+}
+
+# ---------- Notifications Subcommand ----------
+
+cli_notifications() {
+  local action="${1:-}"
+  shift || true
+
+  case "$action" in
+    status)
+      cli_notifications_status "$@"
+      ;;
+    set-pushover)
+      cli_notifications_set_pushover "$@"
+      ;;
+    test|test-pushover)
+      cli_notifications_test_pushover "$@"
+      ;;
+    disable-pushover)
+      cli_notifications_disable_pushover "$@"
+      ;;
+    --help|-h|"")
+      cli_notifications_help
+      return 0
+      ;;
+    *)
+      print_error "Unknown notifications action: $action"
+      cli_notifications_help
+      return $EXIT_USAGE
+      ;;
+  esac
+}
+
+cli_notifications_status() {
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json)
+        JSON_OUTPUT=1
+        export JSON_OUTPUT
+        ;;
+    esac
+    shift
+  done
+
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+
+  if [[ -z "$secrets_dir" ]]; then
+    print_error "System not configured. Run 'backupd' to set up first."
+    return $EXIT_NOT_CONFIGURED
+  fi
+
+  local ntfy_url webhook_url pushover_user pushover_token
+  ntfy_url="$(get_secret "$secrets_dir" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
+  webhook_url="$(get_secret "$secrets_dir" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
+  pushover_user="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+  pushover_token="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
+
+  if is_json_output; then
+    local ntfy_enabled=false webhook_enabled=false pushover_enabled=false
+
+    [[ -n "$ntfy_url" ]] && ntfy_enabled=true
+    [[ -n "$webhook_url" ]] && webhook_enabled=true
+    [[ -n "$pushover_user" && -n "$pushover_token" ]] && pushover_enabled=true
+
+    cat <<EOF
+{
+  "ntfy": {"enabled": $ntfy_enabled},
+  "webhook": {"enabled": $webhook_enabled},
+  "pushover": {"enabled": $pushover_enabled}
+}
+EOF
+    return 0
+  fi
+
+  echo "Notification Status:"
+  [[ -n "$ntfy_url" ]] && print_success "ntfy: configured" || echo "  ntfy: not configured"
+  [[ -n "$webhook_url" ]] && print_success "webhook: configured" || echo "  webhook: not configured"
+  [[ -n "$pushover_user" && -n "$pushover_token" ]] && print_success "pushover: configured" || echo "  pushover: not configured"
+}
+
+cli_notifications_set_pushover() {
+  local user_key="" api_token=""
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --user)
+        user_key="$2"
+        shift
+        ;;
+      --user=*)
+        user_key="${1#--user=}"
+        ;;
+      --token)
+        api_token="$2"
+        shift
+        ;;
+      --token=*)
+        api_token="${1#--token=}"
+        ;;
+      --help|-h)
+        cli_notifications_help
+        return 0
+        ;;
+      *)
+        print_error "Unknown option: $1"
+        return $EXIT_USAGE
+        ;;
+    esac
+    shift
+  done
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Notification configuration requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  # Require configuration
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+  if [[ -z "$secrets_dir" ]]; then
+    print_error "System not configured. Run 'backupd' to set up first."
+    return $EXIT_NOT_CONFIGURED
+  fi
+
+  # Validate inputs
+  if [[ -z "$user_key" || -z "$api_token" ]]; then
+    print_error "Both --user and --token are required."
+    echo "Usage: backupd notifications set-pushover --user USER_KEY --token API_TOKEN"
+    return $EXIT_USAGE
+  fi
+
+  # Validate format (30 alphanumeric characters)
+  if [[ ! "$user_key" =~ ^[A-Za-z0-9]{30}$ ]]; then
+    print_error "Invalid user key format. Must be 30 alphanumeric characters."
+    return $EXIT_USAGE
+  fi
+  if [[ ! "$api_token" =~ ^[A-Za-z0-9]{30}$ ]]; then
+    print_error "Invalid API token format. Must be 30 alphanumeric characters."
+    return $EXIT_USAGE
+  fi
+
+  # Store secrets
+  store_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" "$user_key"
+  store_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" "$api_token"
+
+  # Regenerate scripts
+  regenerate_scripts_silent
+
+  if is_json_output; then
+    echo '{"status": "success", "message": "Pushover configured"}'
+  else
+    print_success "Pushover configured. Regenerating scripts..."
+    print_success "Done. Use 'backupd notifications test-pushover' to verify."
+  fi
+}
+
+cli_notifications_test_pushover() {
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+
+  if [[ -z "$secrets_dir" ]]; then
+    print_error "System not configured. Run 'backupd' to set up first."
+    return $EXIT_NOT_CONFIGURED
+  fi
+
+  local user_key api_token
+  user_key="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+  api_token="$(get_secret "$secrets_dir" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
+
+  if [[ -z "$user_key" || -z "$api_token" ]]; then
+    print_error "Pushover not configured. Use 'backupd notifications set-pushover' first."
+    return $EXIT_NOT_CONFIGURED
+  fi
+
+  local hostname timestamp
+  hostname="$(hostname -f 2>/dev/null || hostname)"
+  timestamp="$(date -Iseconds)"
+
+  [[ "${QUIET_MODE:-0}" -ne 1 ]] && echo -n "Sending test notification to Pushover... "
+
+  local response http_code
+  response=$(timeout 15 curl -s -w "\n%{http_code}" \
+    --form-string "token=$api_token" \
+    --form-string "user=$user_key" \
+    --form-string "title=Backupd Test on $hostname" \
+    --form-string "message=Test notification sent at $timestamp" \
+    --form-string "priority=0" \
+    --form-string "sound=pushover" \
+    https://api.pushover.net/1/messages.json 2>/dev/null) || response="000"
+
+  http_code=$(echo "$response" | tail -1)
+
+  if is_json_output; then
+    if [[ "$http_code" == "200" ]]; then
+      echo '{"status": "success", "http_code": 200}'
+    else
+      echo "{\"status\": \"failed\", \"http_code\": $http_code}"
+    fi
+    return 0
+  fi
+
+  if [[ "$http_code" == "200" ]]; then
+    echo -e "${GREEN}OK (HTTP $http_code)${NC}"
+    return 0
+  else
+    echo -e "${RED}FAILED (HTTP $http_code)${NC}"
+    return 1
+  fi
+}
+
+cli_notifications_disable_pushover() {
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Notification configuration requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  local secrets_dir
+  secrets_dir="$(get_secrets_dir)"
+
+  if [[ -z "$secrets_dir" ]]; then
+    print_error "System not configured."
+    return $EXIT_NOT_CONFIGURED
+  fi
+
+  rm -f "$secrets_dir/$SECRET_PUSHOVER_USER" 2>/dev/null || true
+  rm -f "$secrets_dir/$SECRET_PUSHOVER_TOKEN" 2>/dev/null || true
+
+  regenerate_scripts_silent
+
+  if is_json_output; then
+    echo '{"status": "success", "message": "Pushover disabled"}'
+  else
+    print_success "Pushover notifications disabled"
+  fi
+}
+
+cli_notifications_help() {
+  cat <<EOF
+Usage: backupd notifications [COMMAND] [OPTIONS]
+
+Manage notification settings for backup alerts. Supports ntfy, webhook, and Pushover.
+Interactive configuration available via: backupd -> Notifications menu.
+
+Commands:
+  status                  Show notification configuration status
+  set-pushover            Configure Pushover notifications
+  test, test-pushover     Send a test Pushover notification
+  disable-pushover        Remove Pushover configuration
+
+Options for set-pushover:
+  --user USER_KEY         Pushover User Key (30 characters)
+  --token API_TOKEN       Pushover API Token (30 characters)
+
+Global Options:
+  --json                  Output in JSON format
+  --help, -h              Show this help message
+
+Examples:
+  backupd notifications status
+  backupd notifications status --json
+  backupd notifications set-pushover --user abc123... --token xyz789...
+  backupd notifications test-pushover
+  backupd notifications disable-pushover
+
+Note: For ntfy and webhook configuration, use the interactive menu:
+  sudo backupd -> Notifications
+
+See also: status, backup
+EOF
 }

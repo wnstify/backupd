@@ -146,6 +146,8 @@ SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
 SECRET_WEBHOOK_TOKEN=".c7"
+SECRET_PUSHOVER_USER=".c8"
+SECRET_PUSHOVER_TOKEN=".c9"
 
 # Progress tracking for API
 PROGRESS_DIR="/var/run/backupd"
@@ -240,6 +242,8 @@ NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
+PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
+PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
 
 # Notification failure log
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
@@ -307,22 +311,52 @@ send_webhook() {
   return 1
 }
 
-# Send to both channels, track failures
+# Robust Pushover sender with retry (3 attempts, exponential backoff)
+send_pushover() {
+  local title="$1" message="$2" priority="${3:-0}" sound="${4:-pushover}"
+  [[ -z "$PUSHOVER_USER" || -z "$PUSHOVER_TOKEN" ]] && return 0
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+      --form-string "token=$PUSHOVER_TOKEN" \
+      --form-string "user=$PUSHOVER_USER" \
+      --form-string "title=$title" \
+      --form-string "message=$message" \
+      --form-string "priority=$priority" \
+      --form-string "sound=$sound" \
+      https://api.pushover.net/1/messages.json 2>/dev/null) || http_code="000"
+
+    [[ "$http_code" == "200" ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] PUSHOVER FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
+}
+
+# Send to all channels, track failures
 send_notification() {
-  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
-  local ntfy_ok=0 webhook_ok=0
+  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}" priority="${5:-0}" sound="${6:-pushover}"
+  local ntfy_ok=0 webhook_ok=0 pushover_ok=0
 
   send_ntfy "$title" "$message" && ntfy_ok=1
   send_webhook "$title" "$message" "$event" "$details" && webhook_ok=1
+  send_pushover "$title" "$message" "$priority" "$sound" && pushover_ok=1
 
-  # CRITICAL: Both channels failed - log prominently
-  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+  # CRITICAL: All channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && $pushover_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" || -n "$PUSHOVER_USER" ) ]]; then
     echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
     echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
   fi
 }
 
-send_notification "DB Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started"
+send_notification "DB Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started" "{}" "-1" "none"
 
 # Compressor
 if command -v pigz >/dev/null 2>&1; then
@@ -362,7 +396,7 @@ DBS="$($DB_CLIENT "${MYSQL_ARGS[@]}" -NBe 'SHOW DATABASES' 2>/dev/null | grep -E
 
 if [[ -z "$DBS" ]]; then
   echo "[ERROR] No databases found or cannot connect to database"
-  send_notification "DB Backup Failed on $HOSTNAME" "No databases found" "backup_failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "No databases found" "backup_failed" "{}" "1" "siren"
   exit 6
 fi
 
@@ -389,7 +423,7 @@ done
 
 if [[ $db_count -eq 0 ]]; then
   echo "[ERROR] All database dumps failed"
-  send_notification "DB Backup Failed on $HOSTNAME" "All dumps failed" "backup_failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "All dumps failed" "backup_failed" "{}" "1" "siren"
   exit 7
 fi
 
@@ -404,7 +438,7 @@ tar -C "$TEMP_DIR" -cf - "$STAMP" | $COMPRESSOR | \
 echo "Verifying archive..."
 if ! gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$ARCHIVE" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
   echo "[ERROR] Archive verification failed"
-  send_notification "DB Backup Failed on $HOSTNAME" "Archive verification failed" "backup_failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "Archive verification failed" "backup_failed" "{}" "1" "siren"
   exit 4
 fi
 echo "Archive verified."
@@ -421,7 +455,7 @@ write_progress "uploading" 60 "Uploading to remote storage"
 RCLONE_TIMEOUT=1800  # 30 minutes
 if ! timeout $RCLONE_TIMEOUT rclone copy "$ARCHIVE" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 --low-level-retries 10; then
   echo "[ERROR] Upload failed"
-  send_notification "DB Backup Failed on $HOSTNAME" "Upload failed" "backup_failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "Upload failed" "backup_failed" "{}" "1" "siren"
   exit 8
 fi
 
@@ -471,26 +505,26 @@ if [[ "$RETENTION_MINUTES" -gt 0 ]]; then
 
     if [[ $cleanup_errors -gt 0 ]]; then
       echo "[WARNING] Retention cleanup completed with $cleanup_errors error(s). Removed $cleanup_count old backup(s)."
-      send_notification "DB Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning"
+      send_notification "DB Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning" "{}" "0" "bike"
     elif [[ $cleanup_count -gt 0 ]]; then
       echo "Retention cleanup complete. Removed $cleanup_count old backup(s)."
-      send_notification "DB Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup"
+      send_notification "DB Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup" "{}" "-1" "none"
     else
       echo "Retention cleanup complete. No old backups to remove."
     fi
   else
     echo "  [WARNING] Could not calculate cutoff time, skipping cleanup"
-    send_notification "DB Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed"
+    send_notification "DB Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed" "{}" "1" "falling"
   fi
 fi
 
 if ((${#failures[@]})); then
-  send_notification "DB Backup Completed with Errors on $HOSTNAME" "Backed up: $db_count, Failed: ${failures[*]}" "backup_warning"
+  send_notification "DB Backup Completed with Errors on $HOSTNAME" "Backed up: $db_count, Failed: ${failures[*]}" "backup_warning" "{}" "0" "bike"
   write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
-  send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up" "backup_complete"
+  send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up" "backup_complete" "{}" "0" "magic"
   write_progress "complete" 100 "Backup completed successfully" "completed"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
@@ -849,6 +883,8 @@ SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
 SECRET_WEBHOOK_TOKEN=".c7"
+SECRET_PUSHOVER_USER=".c8"
+SECRET_PUSHOVER_TOKEN=".c9"
 
 # Progress tracking for API
 PROGRESS_DIR="/var/run/backupd"
@@ -936,6 +972,8 @@ NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
+PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
+PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
 
 # Notification failure log
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
@@ -1003,22 +1041,52 @@ send_webhook() {
   return 1
 }
 
-# Send to both channels, track failures
+# Robust Pushover sender with retry (3 attempts, exponential backoff)
+send_pushover() {
+  local title="$1" message="$2" priority="${3:-0}" sound="${4:-pushover}"
+  [[ -z "$PUSHOVER_USER" || -z "$PUSHOVER_TOKEN" ]] && return 0
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+      --form-string "token=$PUSHOVER_TOKEN" \
+      --form-string "user=$PUSHOVER_USER" \
+      --form-string "title=$title" \
+      --form-string "message=$message" \
+      --form-string "priority=$priority" \
+      --form-string "sound=$sound" \
+      https://api.pushover.net/1/messages.json 2>/dev/null) || http_code="000"
+
+    [[ "$http_code" == "200" ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] PUSHOVER FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
+}
+
+# Send to all channels, track failures
 send_notification() {
-  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}"
-  local ntfy_ok=0 webhook_ok=0
+  local title="$1" message="$2" event="${3:-backup}" details="${4:-"{}"}" priority="${5:-0}" sound="${6:-pushover}"
+  local ntfy_ok=0 webhook_ok=0 pushover_ok=0
 
   send_ntfy "$title" "$message" && ntfy_ok=1
   send_webhook "$title" "$message" "$event" "$details" && webhook_ok=1
+  send_pushover "$title" "$message" "$priority" "$sound" && pushover_ok=1
 
-  # CRITICAL: Both channels failed - log prominently
-  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+  # CRITICAL: All channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && $pushover_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" || -n "$PUSHOVER_USER" ) ]]; then
     echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
     echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
   fi
 }
 
-send_notification "Files Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started"
+send_notification "Files Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started" "{}" "-1" "none"
 
 command -v pigz >/dev/null 2>&1 || { echo "$LOG_PREFIX pigz not found"; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "$LOG_PREFIX tar not found"; exit 1; }
@@ -1085,7 +1153,7 @@ done
 
 if [[ ${#site_dirs[@]} -eq 0 ]]; then
   echo "$LOG_PREFIX [ERROR] No directories found matching pattern: $WEB_PATH_PATTERN"
-  send_notification "Files Backup Failed on $HOSTNAME" "No sites found matching pattern" "backup_failed"
+  send_notification "Files Backup Failed on $HOSTNAME" "No sites found matching pattern" "backup_failed" "{}" "1" "siren"
   exit 4
 fi
 
@@ -1177,7 +1245,7 @@ done
 
 if [[ $site_count -eq 0 ]]; then
   echo "$LOG_PREFIX [WARNING] No sites found in $WWW_DIR"
-  send_notification "Files Backup Warning on $HOSTNAME" "No sites found" "backup_warning"
+  send_notification "Files Backup Warning on $HOSTNAME" "No sites found" "backup_warning" "{}" "0" "bike"
   echo "==== $(date +%F' '%T) END (no sites) ===="
   exit 0
 fi
@@ -1214,26 +1282,26 @@ if [[ "$RETENTION_MINUTES" -gt 0 ]]; then
 
     if [[ $cleanup_errors -gt 0 ]]; then
       echo "$LOG_PREFIX [WARNING] Retention cleanup completed with $cleanup_errors error(s). Removed $cleanup_count old backup(s)."
-      send_notification "Files Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning"
+      send_notification "Files Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning" "{}" "0" "bike"
     elif [[ $cleanup_count -gt 0 ]]; then
       echo "$LOG_PREFIX Retention cleanup complete. Removed $cleanup_count old backup(s)."
-      send_notification "Files Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup"
+      send_notification "Files Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup" "{}" "-1" "none"
     else
       echo "$LOG_PREFIX Retention cleanup complete. No old backups to remove."
     fi
   else
     echo "$LOG_PREFIX [WARNING] Could not calculate cutoff time, skipping cleanup"
-    send_notification "Files Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed"
+    send_notification "Files Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed" "{}" "1" "falling"
   fi
 fi
 
 if [[ ${#failures[@]} -gt 0 ]]; then
-  send_notification "Files Backup Errors on $HOSTNAME" "Success: $success_count, Failed: ${failures[*]}" "backup_warning"
+  send_notification "Files Backup Errors on $HOSTNAME" "Success: $success_count, Failed: ${failures[*]}" "backup_warning" "{}" "0" "bike"
   write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
-  send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up" "backup_complete"
+  send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up" "backup_complete" "{}" "0" "magic"
   write_progress "complete" 100 "Backup completed successfully" "completed"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
@@ -1799,6 +1867,8 @@ SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
 SECRET_WEBHOOK_TOKEN=".c7"
+SECRET_PUSHOVER_USER=".c8"
+SECRET_PUSHOVER_TOKEN=".c9"
 
 %%CRYPTO_FUNCTIONS%%
 
@@ -1811,6 +1881,8 @@ NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
+PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
 
 # Notification failure log
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
@@ -1878,16 +1950,46 @@ send_webhook() {
   return 1
 }
 
-# Send to both channels, track failures
+# Robust Pushover sender with retry (3 attempts, exponential backoff)
+send_pushover() {
+  local title="$1" message="$2" priority="${3:-0}" sound="${4:-pushover}"
+  [[ -z "$PUSHOVER_USER" || -z "$PUSHOVER_TOKEN" ]] && return 0
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+      --form-string "token=$PUSHOVER_TOKEN" \
+      --form-string "user=$PUSHOVER_USER" \
+      --form-string "title=$title" \
+      --form-string "message=$message" \
+      --form-string "priority=$priority" \
+      --form-string "sound=$sound" \
+      https://api.pushover.net/1/messages.json 2>/dev/null) || http_code="000"
+
+    [[ "$http_code" == "200" ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] PUSHOVER FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
+}
+
+# Send to all channels, track failures
 send_notification() {
-  local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}"
-  local ntfy_ok=0 webhook_ok=0
+  local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}" priority="${5:-0}" sound="${6:-pushover}"
+  local ntfy_ok=0 webhook_ok=0 pushover_ok=0
 
   send_ntfy "$title" "$message" && ntfy_ok=1
   send_webhook "$title" "$message" "$event" "$details" && webhook_ok=1
+  send_pushover "$title" "$message" "$priority" "$sound" && pushover_ok=1
 
-  # CRITICAL: Both channels failed - log prominently
-  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+  # CRITICAL: All channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && $pushover_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" || -n "$PUSHOVER_USER" ) ]]; then
     echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
     echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
   fi
@@ -2087,17 +2189,17 @@ if [[ -n "$full_verify_reminder" ]]; then
 fi
 
 if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-  send_notification "Quick Check FAILED on $HOSTNAME" "$notification_body"
+  send_notification "Quick Check FAILED on $HOSTNAME" "$notification_body" "verify_failed" "{}" "1" "falling"
   exit 1
 elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
-  send_notification "Quick Check WARNING on $HOSTNAME" "$notification_body"
+  send_notification "Quick Check WARNING on $HOSTNAME" "$notification_body" "verify_warning" "{}" "0" "bike"
   exit 0
 else
   # Only notify on success if full verify reminder is needed
   if [[ -n "$full_verify_reminder" ]]; then
-    send_notification "Quick Check OK - Full Test Needed on $HOSTNAME" "$notification_body"
+    send_notification "Quick Check OK - Full Test Needed on $HOSTNAME" "$notification_body" "verify_warning" "{}" "0" "bike"
   else
-    send_notification "Quick Check PASSED on $HOSTNAME" "$notification_body"
+    send_notification "Quick Check PASSED on $HOSTNAME" "$notification_body" "verify_passed" "{}" "0" "magic"
   fi
 fi
 
@@ -2163,6 +2265,8 @@ SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
 SECRET_WEBHOOK_TOKEN=".c7"
+SECRET_PUSHOVER_USER=".c8"
+SECRET_PUSHOVER_TOKEN=".c9"
 
 %%CRYPTO_FUNCTIONS%%
 
@@ -2175,6 +2279,8 @@ NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
 WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
+PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
+PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
 
 # Notification failure log
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
@@ -2243,16 +2349,51 @@ send_webhook() {
   return 1
 }
 
-# Send to both channels, track failures
+# Robust Pushover sender with retry (3 attempts, exponential backoff)
+send_pushover() {
+  local title="$1" message="$2" priority="${3:-0}" sound="${4:-pushover}"
+  [[ -z "$PUSHOVER_USER" || -z "$PUSHOVER_TOKEN" ]] && return 0
+
+  local attempt=1 max_attempts=3 delay=2 http_code
+  while [[ $attempt -le $max_attempts ]]; do
+    http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+      --form-string "token=$PUSHOVER_TOKEN" \
+      --form-string "user=$PUSHOVER_USER" \
+      --form-string "title=$title" \
+      --form-string "message=$message" \
+      --form-string "priority=$priority" \
+      --form-string "sound=$sound" \
+      https://api.pushover.net/1/messages.json 2>/dev/null) || http_code="000"
+
+    [[ "$http_code" == "200" ]] && return 0
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      sleep $delay
+      delay=$((delay * 2))
+    fi
+    ((attempt++))
+  done
+
+  echo "[$(date -Iseconds)] PUSHOVER FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
+  return 1
+}
+
+# Send to all channels, track failures
 send_notification() {
   local title="$1" message="$2" priority="${3:-default}" event="${4:-verify_reminder}"
-  local ntfy_ok=0 webhook_ok=0
+  local ntfy_ok=0 webhook_ok=0 pushover_ok=0
+
+  # Map priority for Pushover (-1=low, 0=normal, 1=high)
+  local pushover_priority=0
+  [[ "$priority" == "high" ]] && pushover_priority=1
+  [[ "$priority" == "low" ]] && pushover_priority=-1
 
   send_ntfy "$title" "$message" "$priority" && ntfy_ok=1
   send_webhook "$title" "$message" "$event" && webhook_ok=1
+  send_pushover "$title" "$message" "$pushover_priority" "siren" && pushover_ok=1
 
-  # CRITICAL: Both channels failed - log prominently
-  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" ) ]]; then
+  # CRITICAL: All channels failed - log prominently
+  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && $pushover_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" || -n "$PUSHOVER_USER" ) ]]; then
     echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
     echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
   fi
