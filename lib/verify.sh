@@ -13,6 +13,17 @@
 LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
 FULL_VERIFY_INTERVAL_DAYS=30
 
+# Verification log file
+VERIFY_LOG_FILE="$INSTALL_DIR/logs/verify_logfile.log"
+
+# Helper to log verification events
+log_verify() {
+  local message="$1"
+  local timestamp
+  timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+  echo "[$timestamp] $message" >> "$VERIFY_LOG_FILE" 2>/dev/null || true
+}
+
 # ---------- Quick Verification (Metadata-only, no download) ----------
 # Uses: restic check (fast, verifies repository structure and index)
 
@@ -26,11 +37,15 @@ verify_quick() {
   rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
 
+  # Log start of verification
+  log_verify "START quick verification (type: $backup_type)"
+
   # Get restic repository password
   local restic_password
   restic_password="$(get_secret "$secrets_dir" ".c1")"
   if [[ -z "$restic_password" ]]; then
     print_error "No repository password found in secrets"
+    log_verify "ERROR quick verification: No repository password found"
     return 1
   fi
 
@@ -55,6 +70,7 @@ verify_quick() {
       [[ -z "$snapshot_count" ]] && snapshot_count="0"
       db_details="Repository OK, $snapshot_count snapshot(s)"
       print_success "Database repository: $db_details"
+      log_verify "PASSED Database quick check: $db_details"
     else
       db_result="FAILED"
       # Extract error from output (use || true to prevent pipefail exit)
@@ -62,6 +78,7 @@ verify_quick() {
       error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       db_details="${error_msg:-Repository check failed}"
       print_error "Database repository: $db_details"
+      log_verify "FAILED Database quick check: $db_details"
       echo "$check_output" | head -10
     fi
     echo
@@ -83,6 +100,7 @@ verify_quick() {
       [[ -z "$snapshot_count" ]] && snapshot_count="0"
       files_details="Repository OK, $snapshot_count snapshot(s)"
       print_success "Files repository: $files_details"
+      log_verify "PASSED Files quick check: $files_details"
     else
       files_result="FAILED"
       # Extract error from output (use || true to prevent pipefail exit)
@@ -90,10 +108,14 @@ verify_quick() {
       error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       files_details="${error_msg:-Repository check failed}"
       print_error "Files repository: $files_details"
+      log_verify "FAILED Files quick check: $files_details"
       echo "$check_output" | head -10
     fi
     echo
   fi
+
+  # Log completion
+  log_verify "END quick verification - DB: $db_result, Files: $files_result"
 
   # Send notifications (ntfy + webhook)
   send_verify_notification "quick" "$db_result" "$files_result" "$db_details" "$files_details"
@@ -118,11 +140,15 @@ verify_full() {
   rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
 
+  # Log start of verification
+  log_verify "START full verification (type: $backup_type)"
+
   # Get restic repository password
   local restic_password
   restic_password="$(get_secret "$secrets_dir" ".c1")"
   if [[ -z "$restic_password" ]]; then
     print_error "No repository password found in secrets"
+    log_verify "ERROR full verification: No repository password found"
     return 1
   fi
 
@@ -166,6 +192,7 @@ verify_full() {
 
       db_details="All data verified OK ($snapshot_count snapshots, $total_size_human, ${duration}s)"
       print_success "Database repository: $db_details"
+      log_verify "PASSED Database full verification: $db_details"
     else
       db_result="FAILED"
       # Extract error from output (use || true to prevent pipefail exit)
@@ -173,6 +200,7 @@ verify_full() {
       error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       db_details="${error_msg:-Full verification failed}"
       print_error "Database repository: $db_details"
+      log_verify "FAILED Database full verification: $db_details"
       echo "$check_output" | head -20
     fi
   fi
@@ -212,6 +240,7 @@ verify_full() {
 
       files_details="All data verified OK ($snapshot_count snapshots, $total_size_human, ${duration}s)"
       print_success "Files repository: $files_details"
+      log_verify "PASSED Files full verification: $files_details"
     else
       files_result="FAILED"
       # Extract error from output (use || true to prevent pipefail exit)
@@ -219,9 +248,13 @@ verify_full() {
       error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       files_details="${error_msg:-Full verification failed}"
       print_error "Files repository: $files_details"
+      log_verify "FAILED Files full verification: $files_details"
       echo "$check_output" | head -20
     fi
   fi
+
+  # Log completion
+  log_verify "END full verification - DB: $db_result, Files: $files_result"
 
   # Summary
   echo
