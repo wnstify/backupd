@@ -49,16 +49,17 @@ verify_quick() {
     local check_output
     if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check 2>&1); then
       db_result="PASSED"
-      # Get snapshot count for details
+      # Get snapshot count for details (use || true to prevent pipefail exit)
       local snapshot_count
-      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
+      [[ -z "$snapshot_count" ]] && snapshot_count="0"
       db_details="Repository OK, $snapshot_count snapshot(s)"
       print_success "Database repository: $db_details"
     else
       db_result="FAILED"
-      # Extract error from output
+      # Extract error from output (use || true to prevent pipefail exit)
       local error_msg
-      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       db_details="${error_msg:-Repository check failed}"
       print_error "Database repository: $db_details"
       echo "$check_output" | head -10
@@ -76,14 +77,17 @@ verify_quick() {
     local check_output
     if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check 2>&1); then
       files_result="PASSED"
+      # Get snapshot count for details (use || true to prevent pipefail exit)
       local snapshot_count
-      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
+      [[ -z "$snapshot_count" ]] && snapshot_count="0"
       files_details="Repository OK, $snapshot_count snapshot(s)"
       print_success "Files repository: $files_details"
     else
       files_result="FAILED"
+      # Extract error from output (use || true to prevent pipefail exit)
       local error_msg
-      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       files_details="${error_msg:-Repository check failed}"
       print_error "Files repository: $files_details"
       echo "$check_output" | head -10
@@ -152,19 +156,21 @@ verify_full() {
 
       db_result="PASSED"
 
-      # Get repository stats
+      # Get repository stats (use || true to prevent pipefail exit)
       local repo_stats snapshot_count total_size
       repo_stats=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" stats --json 2>/dev/null || echo "{}")
-      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
-      total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
+      [[ -z "$snapshot_count" ]] && snapshot_count="0"
+      total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2 || true)
       total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
 
       db_details="All data verified OK ($snapshot_count snapshots, $total_size_human, ${duration}s)"
       print_success "Database repository: $db_details"
     else
       db_result="FAILED"
+      # Extract error from output (use || true to prevent pipefail exit)
       local error_msg
-      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       db_details="${error_msg:-Full verification failed}"
       print_error "Database repository: $db_details"
       echo "$check_output" | head -20
@@ -196,18 +202,21 @@ verify_full() {
 
       files_result="PASSED"
 
+      # Get repository stats (use || true to prevent pipefail exit)
       local repo_stats snapshot_count total_size
       repo_stats=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" stats --json 2>/dev/null || echo "{}")
-      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
-      total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
+      [[ -z "$snapshot_count" ]] && snapshot_count="0"
+      total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2 || true)
       total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
 
       files_details="All data verified OK ($snapshot_count snapshots, $total_size_human, ${duration}s)"
       print_success "Files repository: $files_details"
     else
       files_result="FAILED"
+      # Extract error from output (use || true to prevent pipefail exit)
       local error_msg
-      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1 || true)
       files_details="${error_msg:-Full verification failed}"
       print_error "Files repository: $files_details"
       echo "$check_output" | head -20

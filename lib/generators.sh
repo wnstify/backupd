@@ -1471,7 +1471,9 @@ if [[ -n "$RCLONE_DB_PATH" ]]; then
   echo "$LOG_PREFIX Checking database repository: $REPO"
 
   if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check 2>&1); then
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+    # Use || true to prevent pipefail exit when grep finds no matches
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
+    [[ -z "$snapshot_count" ]] && snapshot_count="0"
     db_result="PASSED"
     db_details="OK, $snapshot_count snapshot(s)"
     echo "$LOG_PREFIX   Database: $db_details"
@@ -1489,7 +1491,9 @@ if [[ -n "$RCLONE_FILES_PATH" ]]; then
   echo "$LOG_PREFIX Checking files repository: $REPO"
 
   if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check 2>&1); then
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+    # Use || true to prevent pipefail exit when grep finds no matches
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
+    [[ -z "$snapshot_count" ]] && snapshot_count="0"
     files_result="PASSED"
     files_details="OK, $snapshot_count snapshot(s)"
     echo "$LOG_PREFIX   Files: $files_details"
@@ -1675,9 +1679,11 @@ if [[ -n "$RCLONE_DB_PATH" ]]; then
     duration=$((end_time - start_time))
     total_duration=$((total_duration + duration))
 
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
-    repo_stats=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$repo" stats --json 2>/dev/null || echo "{}")
-    total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+    # Use || true to prevent pipefail exit when grep finds no matches
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
+    [[ -z "$snapshot_count" ]] && snapshot_count="0"
+    repo_stats=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" stats --json 2>/dev/null || echo "{}")
+    total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2 || true)
     total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
 
     db_result="PASSED"
@@ -1709,9 +1715,11 @@ if [[ -n "$RCLONE_FILES_PATH" ]]; then
     duration=$((end_time - start_time))
     total_duration=$((total_duration + duration))
 
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+    # Use || true to prevent pipefail exit when grep finds no matches
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
+    [[ -z "$snapshot_count" ]] && snapshot_count="0"
     repo_stats=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" stats --json 2>/dev/null || echo "{}")
-    total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+    total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2 || true)
     total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
 
     files_result="PASSED"
