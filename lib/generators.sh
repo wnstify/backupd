@@ -949,19 +949,39 @@ list_db_snapshots_menu() {
   printf "%-10s %-20s %-15s %s\n" "ID" "DATE" "DATABASE" "HOST"
   echo "-------------------------------------------"
 
-  # Parse JSON and display (using grep/sed for portability)
   local count=0
-  while IFS= read -r line; do
-    local short_id time hostname tags
-    short_id="$(echo "$line" | grep -o '"short_id":"[^"]*"' | cut -d'"' -f4)"
-    time="$(echo "$line" | grep -o '"time":"[^"]*"' | cut -d'"' -f4 | cut -d'T' -f1,2 | tr 'T' ' ' | cut -d'.' -f1)"
-    hostname="$(echo "$line" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4)"
-    tags="$(echo "$line" | grep -o '"tags":\[[^]]*\]' | grep -o 'db:[^"]*' | head -1)"
-    db_name="${tags#db:}"
 
-    [[ -n "$short_id" ]] && printf "%-10s %-20s %-15s %s\n" "$short_id" "$time" "${db_name:-unknown}" "$hostname"
-    ((count++)) || true
-  done < <(echo "$snapshots_json" | tr '},{' '\n' | grep -E '"short_id"')
+  # Use jq if available (reliable), otherwise fall back to portable parsing
+  if command -v jq >/dev/null 2>&1; then
+    while IFS=$'\t' read -r short_id time hostname db_name; do
+      [[ -n "$short_id" ]] && printf "%-10s %-20s %-15s %s\n" "$short_id" "$time" "${db_name:-unknown}" "$hostname"
+      ((count++)) || true
+    done < <(echo "$snapshots_json" | jq -r '.[] | [
+      .short_id,
+      (.time | split(".")[0] | gsub("T"; " ")),
+      .hostname,
+      ((.tags // []) | map(select(startswith("db:"))) | first // "unknown" | ltrimstr("db:"))
+    ] | @tsv')
+  else
+    # Portable approach: extract complete JSON objects using awk
+    while IFS= read -r obj; do
+      [[ -z "$obj" ]] && continue
+
+      local short_id time hostname db_name tags_str
+
+      # Extract fields from complete JSON object
+      short_id="$(echo "$obj" | sed -n 's/.*"short_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      time="$(echo "$obj" | sed -n 's/.*"time"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      time="${time%%.*}"; time="${time/T/ }"
+      hostname="$(echo "$obj" | sed -n 's/.*"hostname"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      tags_str="$(echo "$obj" | sed -n 's/.*"tags"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p')"
+      db_name="$(echo "$tags_str" | grep -o '"db:[^"]*"' | head -1 | tr -d '"')"
+      db_name="${db_name#db:}"
+
+      [[ -n "$short_id" ]] && printf "%-10s %-20s %-15s %s\n" "$short_id" "$time" "${db_name:-unknown}" "$hostname"
+      ((count++)) || true
+    done < <(echo "$snapshots_json" | awk 'BEGIN{RS="";FS=""}{gsub(/^\[/,"");gsub(/\]$/,"");n=split($0,c,"");d=0;o="";for(i=1;i<=n;i++){if(c[i]=="{"){d++;o=o c[i]}else if(c[i]=="}"){o=o c[i];d--;if(d==0){print o;o=""}}else if(d>0){o=o c[i]}}}')
+  fi
 
   echo "-------------------------------------------"
   echo "Total: $count snapshot(s)"
@@ -1048,7 +1068,7 @@ AUTHEOF
   TEMP_SQL_FILE="$(mktemp --suffix=.sql)"
   chmod 600 "$TEMP_SQL_FILE"
 
-  if ! RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$DB_REPO" dump "$snapshot_id" / > "$TEMP_SQL_FILE" 2>/dev/null; then
+  if ! RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$DB_REPO" dump "$snapshot_id" "/${db_name}.sql" > "$TEMP_SQL_FILE" 2>/dev/null; then
     print_error "Failed to extract database from snapshot"
     press_enter
     return
@@ -1101,17 +1121,38 @@ list_files_snapshots_menu() {
   echo "-------------------------------------------"
 
   local count=0
-  while IFS= read -r line; do
-    local short_id time hostname tags
-    short_id="$(echo "$line" | grep -o '"short_id":"[^"]*"' | cut -d'"' -f4)"
-    time="$(echo "$line" | grep -o '"time":"[^"]*"' | cut -d'"' -f4 | cut -d'T' -f1,2 | tr 'T' ' ' | cut -d'.' -f1)"
-    hostname="$(echo "$line" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4)"
-    tags="$(echo "$line" | grep -o '"tags":\[[^]]*\]' | grep -o 'site:[^"]*' | head -1)"
-    site_name="${tags#site:}"
 
-    [[ -n "$short_id" ]] && printf "%-10s %-20s %-20s %s\n" "$short_id" "$time" "${site_name:-unknown}" "$hostname"
-    ((count++)) || true
-  done < <(echo "$snapshots_json" | tr '},{' '\n' | grep -E '"short_id"')
+  # Use jq if available (reliable), otherwise fall back to portable parsing
+  if command -v jq >/dev/null 2>&1; then
+    while IFS=$'\t' read -r short_id time hostname site_name; do
+      [[ -n "$short_id" ]] && printf "%-10s %-20s %-20s %s\n" "$short_id" "$time" "${site_name:-unknown}" "$hostname"
+      ((count++)) || true
+    done < <(echo "$snapshots_json" | jq -r '.[] | [
+      .short_id,
+      (.time | split(".")[0] | gsub("T"; " ")),
+      .hostname,
+      ((.tags // []) | map(select(startswith("site:"))) | first // "unknown" | ltrimstr("site:"))
+    ] | @tsv')
+  else
+    # Portable approach: extract complete JSON objects using awk
+    while IFS= read -r obj; do
+      [[ -z "$obj" ]] && continue
+
+      local short_id time hostname site_name tags_str
+
+      # Extract fields from complete JSON object
+      short_id="$(echo "$obj" | sed -n 's/.*"short_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      time="$(echo "$obj" | sed -n 's/.*"time"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      time="${time%%.*}"; time="${time/T/ }"
+      hostname="$(echo "$obj" | sed -n 's/.*"hostname"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      tags_str="$(echo "$obj" | sed -n 's/.*"tags"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p')"
+      site_name="$(echo "$tags_str" | grep -o '"site:[^"]*"' | head -1 | tr -d '"')"
+      site_name="${site_name#site:}"
+
+      [[ -n "$short_id" ]] && printf "%-10s %-20s %-20s %s\n" "$short_id" "$time" "${site_name:-unknown}" "$hostname"
+      ((count++)) || true
+    done < <(echo "$snapshots_json" | awk 'BEGIN{RS="";FS=""}{gsub(/^\[/,"");gsub(/\]$/,"");n=split($0,c,"");d=0;o="";for(i=1;i<=n;i++){if(c[i]=="{"){d++;o=o c[i]}else if(c[i]=="}"){o=o c[i];d--;if(d==0){print o;o=""}}else if(d>0){o=o c[i]}}}')
+  fi
 
   echo "-------------------------------------------"
   echo "Total: $count snapshot(s)"

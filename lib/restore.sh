@@ -197,13 +197,19 @@ AUTHEOF
     MYSQL_ARGS=("--defaults-extra-file=$MYSQL_AUTH_FILE")
   fi
 
+  # Get database name from snapshot tags
+  local db_name
+  db_name="$(RESTIC_PASSWORD="$password" restic -r "$repo" snapshots "$snapshot_id" --json 2>/dev/null | grep -o 'db:[^"]*' | head -1)"
+  db_name="${db_name#db:}"
+  [[ -z "$db_name" ]] && db_name="unknown"
+
   # Create temp file for SQL dump
   local temp_sql
   temp_sql="$(mktemp --suffix=.sql)"
   chmod 600 "$temp_sql"
 
-  echo "Extracting database from snapshot..."
-  if RESTIC_PASSWORD="$password" restic -r "$repo" dump "$snapshot_id" / > "$temp_sql" 2>/dev/null; then
+  echo "Extracting database '$db_name' from snapshot..."
+  if RESTIC_PASSWORD="$password" restic -r "$repo" dump "$snapshot_id" "/${db_name}.sql" > "$temp_sql" 2>/dev/null; then
     local sql_size
     sql_size="$(stat -c%s "$temp_sql" 2>/dev/null || echo 0)"
     echo "Extracted $(numfmt --to=iec "$sql_size" 2>/dev/null || echo "$sql_size bytes")"
