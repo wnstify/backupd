@@ -360,6 +360,7 @@ for db in $DBS; do
   if $DB_DUMP "${MYSQL_ARGS[@]}" --databases "$db" --single-transaction --quick \
       --routines --events --triggers --hex-blob --default-character-set=utf8mb4 2>/dev/null | \
     RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" backup \
+      --retry-lock 2m \
       --stdin \
       --stdin-filename "${db}.sql" \
       --tag "database" \
@@ -383,6 +384,7 @@ fi
 write_progress "retention" 80 "Applying retention policy"
 echo "$LOG_PREFIX Applying retention policy (keeping backups within $RETENTION_DAYS days)..."
 if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
+    --retry-lock 2m \
     --tag "database" \
     --keep-within "${RETENTION_DAYS}d" \
     --prune 2>&1; then
@@ -783,6 +785,7 @@ for site_path in "${site_dirs[@]}"; do
 
   # Backup site using restic
   if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" backup "$webroot" \
+      --retry-lock 2m \
       --tag "files" \
       --tag "site:${site_tag}" \
       --host "$HOSTNAME" 2>&1; then
@@ -805,6 +808,7 @@ fi
 write_progress "retention" 80 "Applying retention policy"
 echo "$LOG_PREFIX Applying retention policy (keeping backups within $RETENTION_DAYS days)..."
 if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
+    --retry-lock 2m \
     --tag "files" \
     --keep-within "${RETENTION_DAYS}d" \
     --prune 2>&1; then
@@ -1473,9 +1477,9 @@ if [[ -n "$RCLONE_DB_PATH" ]]; then
   REPO="rclone:${RCLONE_REMOTE}:${RCLONE_DB_PATH}"
   echo "$LOG_PREFIX Checking database repository: $REPO"
 
-  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check 2>&1); then
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --retry-lock 2m 2>&1); then
     # Use || true to prevent pipefail exit when grep finds no matches
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --retry-lock 2m --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
     [[ -z "$snapshot_count" ]] && snapshot_count="0"
     db_result="PASSED"
     db_details="OK, $snapshot_count snapshot(s)"
@@ -1493,9 +1497,9 @@ if [[ -n "$RCLONE_FILES_PATH" ]]; then
   REPO="rclone:${RCLONE_REMOTE}:${RCLONE_FILES_PATH}"
   echo "$LOG_PREFIX Checking files repository: $REPO"
 
-  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check 2>&1); then
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --retry-lock 2m 2>&1); then
     # Use || true to prevent pipefail exit when grep finds no matches
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --retry-lock 2m --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
     [[ -z "$snapshot_count" ]] && snapshot_count="0"
     files_result="PASSED"
     files_details="OK, $snapshot_count snapshot(s)"
@@ -1678,13 +1682,13 @@ if [[ -n "$RCLONE_DB_PATH" ]]; then
 
   start_time=$(date +%s)
 
-  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --read-data 2>&1); then
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --read-data --retry-lock 2m 2>&1); then
     end_time=$(date +%s)
     duration=$((end_time - start_time))
     total_duration=$((total_duration + duration))
 
     # Use || true to prevent pipefail exit when grep finds no matches
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --retry-lock 2m --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
     [[ -z "$snapshot_count" ]] && snapshot_count="0"
     repo_stats=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" stats --json 2>/dev/null || echo "{}")
     total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2 || true)
@@ -1714,13 +1718,13 @@ if [[ -n "$RCLONE_FILES_PATH" ]]; then
 
   start_time=$(date +%s)
 
-  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --read-data 2>&1); then
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --read-data --retry-lock 2m 2>&1); then
     end_time=$(date +%s)
     duration=$((end_time - start_time))
     total_duration=$((total_duration + duration))
 
     # Use || true to prevent pipefail exit when grep finds no matches
-    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --retry-lock 2m --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
     [[ -z "$snapshot_count" ]] && snapshot_count="0"
     repo_stats=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" stats --json 2>/dev/null || echo "{}")
     total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2 || true)

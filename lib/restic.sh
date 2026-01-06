@@ -44,11 +44,13 @@ init_restic_repo() {
 
 # Check if repository exists and is accessible
 # Returns: 0 if repository exists and is valid, 1 otherwise
+# Uses 'cat config' to avoid lock conflicts (snapshots requires lock)
 repo_exists() {
   local repo="$1"
   local password="$2"
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" snapshots --quiet 2>/dev/null
+  # Use 'cat config' which doesn't require a lock, unlike 'snapshots'
+  RESTIC_PASSWORD="$password" restic -r "$repo" cat config &>/dev/null
 }
 
 # Unlock a repository (remove stale locks)

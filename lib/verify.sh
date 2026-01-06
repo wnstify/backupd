@@ -62,11 +62,11 @@ verify_quick() {
     echo
 
     local check_output
-    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check 2>&1); then
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --retry-lock 2m 2>&1); then
       db_result="PASSED"
       # Get snapshot count for details (use || true to prevent pipefail exit)
       local snapshot_count
-      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --retry-lock 2m --tag database --json 2>/dev/null | grep -c '"short_id"' || true)
       [[ -z "$snapshot_count" ]] && snapshot_count="0"
       db_details="Repository OK, $snapshot_count snapshot(s)"
       print_success "Database repository: $db_details"
@@ -92,11 +92,11 @@ verify_quick() {
     echo
 
     local check_output
-    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check 2>&1); then
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --retry-lock 2m 2>&1); then
       files_result="PASSED"
       # Get snapshot count for details (use || true to prevent pipefail exit)
       local snapshot_count
-      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --retry-lock 2m --tag files --json 2>/dev/null | grep -c '"short_id"' || true)
       [[ -z "$snapshot_count" ]] && snapshot_count="0"
       files_details="Repository OK, $snapshot_count snapshot(s)"
       print_success "Files repository: $files_details"

@@ -283,8 +283,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$script_path
-StandardOutput=append:$INSTALL_DIR/logs/${timer_type}_logfile.log
-StandardError=append:$INSTALL_DIR/logs/${timer_type}_logfile.log
+StandardOutput=journal
+StandardError=journal
 Nice=10
 IOSchedulingClass=idle
 

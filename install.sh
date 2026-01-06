@@ -521,8 +521,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/etc/backupd/scripts/db_backup.sh
-StandardOutput=append:/etc/backupd/logs/db_logfile.log
-StandardError=append:/etc/backupd/logs/db_logfile.log
+StandardOutput=journal
+StandardError=journal
 Nice=10
 IOSchedulingClass=idle
 
@@ -555,8 +555,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/etc/backupd/scripts/files_backup.sh
-StandardOutput=append:/etc/backupd/logs/files_logfile.log
-StandardError=append:/etc/backupd/logs/files_logfile.log
+StandardOutput=journal
+StandardError=journal
 Nice=10
 IOSchedulingClass=idle
 
@@ -589,8 +589,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/etc/backupd/scripts/verify_backup.sh
-StandardOutput=append:/etc/backupd/logs/verify_logfile.log
-StandardError=append:/etc/backupd/logs/verify_logfile.log
+StandardOutput=journal
+StandardError=journal
 Nice=10
 IOSchedulingClass=idle
 
@@ -623,8 +623,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/etc/backupd/scripts/verify_full_backup.sh
-StandardOutput=append:/etc/backupd/logs/verify_full_logfile.log
-StandardError=append:/etc/backupd/logs/verify_full_logfile.log
+StandardOutput=journal
+StandardError=journal
 Nice=10
 IOSchedulingClass=idle
 
