@@ -67,6 +67,8 @@ umask 077
 # ============================================================================
 
 INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/logging.sh"
+source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
@@ -435,6 +437,8 @@ umask 077
 # ============================================================================
 
 INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/logging.sh"
+source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
@@ -853,6 +857,8 @@ umask 077
 # ============================================================================
 
 INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/logging.sh"
+source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
@@ -1292,6 +1298,8 @@ umask 077
 # ============================================================================
 
 INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/logging.sh"
+source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
@@ -1484,6 +1492,8 @@ umask 077
 # ============================================================================
 
 INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/logging.sh"
+source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
