@@ -641,14 +641,14 @@ disable_all_notifications() {
 # ---------- Helper: Regenerate Scripts Silently ----------
 
 regenerate_scripts_silent() {
-  local secrets_dir rclone_remote rclone_db_path rclone_files_path retention_minutes
+  local secrets_dir rclone_remote rclone_db_path rclone_files_path retention_days
   local web_path_pattern webroot_subdir do_database do_files
 
   secrets_dir="$(get_secrets_dir)"
   rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
   rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
-  retention_minutes="$(get_config_value 'RETENTION_MINUTES')"
+  retention_days="$(get_config_value 'RETENTION_DAYS')"
   web_path_pattern="$(get_config_value 'WEB_PATH_PATTERN')"
   webroot_subdir="$(get_config_value 'WEBROOT_SUBDIR')"
   do_database="$(get_config_value 'DO_DATABASE')"
@@ -657,7 +657,7 @@ regenerate_scripts_silent() {
   # Only regenerate if we have the minimum config
   if [[ -n "$secrets_dir" && -n "$rclone_remote" ]]; then
     generate_all_scripts "$secrets_dir" "$do_database" "$do_files" "$rclone_remote" \
-      "$rclone_db_path" "$rclone_files_path" "${retention_minutes:-43200}" \
+      "$rclone_db_path" "$rclone_files_path" "${retention_days:-30}" \
       "${web_path_pattern:-/var/www/*}" "${webroot_subdir:-.}" 2>/dev/null
 
     # Also regenerate verify scripts if they exist

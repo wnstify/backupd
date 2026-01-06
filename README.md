@@ -14,8 +14,8 @@ A secure, automated backup solution for web applications and MySQL/MariaDB datab
 
 This tool provides a complete backup solution for web hosting environments:
 
-1. **Database Backups** — Dumps all MySQL/MariaDB databases, compresses with pigz, encrypts with GPG, uploads to cloud storage
-2. **File Backups** — Archives web applications (WordPress, Laravel, Node.js, PHP, etc.) with auto-detected panel paths
+1. **Database Backups** — Dumps all MySQL/MariaDB databases, encrypted and deduplicated by restic, stored via rclone to cloud storage
+2. **File Backups** — Archives web applications (WordPress, Laravel, Node.js, PHP, etc.) with restic deduplication and encryption
 3. **Secure Credential Storage** — All credentials (database, cloud storage) are encrypted with AES-256 and bound to your server's machine-id
 4. **Automated Scheduling** — Uses systemd timers for reliable, automatic backups with retry on failure
 5. **Retention & Cleanup** — Automatic deletion of old backups based on configurable retention policy
@@ -26,17 +26,20 @@ This tool provides a complete backup solution for web hosting environments:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Your Server                              │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
-│  │ Database │───▶│ Compress │───▶│ Encrypt  │───▶│  Upload  │──┼──▶ Cloud Storage
-│  │  Dump    │    │  (pigz)  │    │  (GPG)   │    │ (rclone) │  │    (S3/B2/etc)
-│  └──────────┘    └──────────┘    └──────────┘    └──────────┘  │
+│  ┌──────────┐    ┌────────────────────────────┐  ┌──────────┐  │
+│  │ Database │───▶│         Restic             │──│  rclone  │──┼──▶ Cloud Storage
+│  │  Dump    │    │ (encrypt + dedup + verify) │  │(transport)│ │    (S3/B2/etc)
+│  └──────────┘    └────────────────────────────┘  └──────────┘  │
 │                                                                 │
-│  ┌──────────┐    ┌──────────┐                    ┌──────────┐  │
-│  │   Web    │───▶│ Compress │───────────────────▶│  Upload  │──┼──▶ Cloud Storage
-│  │   Apps   │    │(tar+pigz)│                    │ (rclone) │  │
-│  └──────────┘    └──────────┘                    └──────────┘  │
+│  ┌──────────┐    ┌────────────────────────────┐  ┌──────────┐  │
+│  │   Web    │───▶│         Restic             │──│  rclone  │──┼──▶ Cloud Storage
+│  │   Apps   │    │ (encrypt + dedup + verify) │  │(transport)│ │
+│  └──────────┘    └────────────────────────────┘  └──────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+> **v3.0 Architecture**: Restic handles all backup operations (encryption, deduplication, verification).
+> rclone provides cloud storage transport to 40+ providers. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---
 
@@ -101,8 +104,8 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 | **Access** | Root or sudo |
 | **MySQL/MariaDB** | For database backups |
 | **systemd** | For scheduled backups |
-| **pigz** | Auto-installed (parallel gzip) |
-| **rclone** | Auto-installed (cloud storage) |
+| **restic** | Auto-installed (backup engine with encryption + deduplication) |
+| **rclone** | Auto-installed (cloud storage transport) |
 | **argon2** | Auto-installed (modern encryption, falls back to PBKDF2 if unavailable) |
 
 ---
@@ -431,7 +434,7 @@ Automatic cleanup of old backups based on configurable retention periods:
 
 1. **After each backup** — Old backups are automatically checked and deleted
 2. **Based on file age** — Uses the backup file's modification time
-3. **Safe cleanup** — Only deletes files matching backup patterns (e.g., `*-db_backups-*.tar.gz.gpg`)
+3. **Safe cleanup** — Restic retention policies (`restic forget --prune`) safely remove old snapshots
 
 ### Managing Retention
 

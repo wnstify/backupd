@@ -151,33 +151,27 @@ change_retention_policy() {
   echo
   echo "Select new retention period:"
   echo
-  echo "  1) 1 minute (TESTING ONLY)"
-  echo "  2) 1 hour (TESTING)"
-  echo "  3) 7 days"
-  echo "  4) 14 days"
-  echo "  5) 30 days"
-  echo "  6) 60 days"
-  echo "  7) 90 days"
-  echo "  8) 365 days (1 year)"
-  echo "  9) No automatic cleanup"
+  echo "  1) 7 days"
+  echo "  2) 14 days"
+  echo "  3) 30 days (recommended)"
+  echo "  4) 60 days"
+  echo "  5) 90 days"
+  echo "  6) 365 days (1 year)"
   echo "  0) Cancel"
   echo
-  read -p "Select option [0-9]: " RETENTION_CHOICE
+  read -p "Select option [0-6]: " RETENTION_CHOICE
 
   [[ "$RETENTION_CHOICE" == "0" ]] && return
 
-  local RETENTION_MINUTES=0
+  local RETENTION_DAYS=30
   local RETENTION_DESC=""
   case "$RETENTION_CHOICE" in
-    1) RETENTION_MINUTES=1; RETENTION_DESC="1 minute (TESTING)" ;;
-    2) RETENTION_MINUTES=60; RETENTION_DESC="1 hour (TESTING)" ;;
-    3) RETENTION_MINUTES=$((7 * 24 * 60)); RETENTION_DESC="7 days" ;;
-    4) RETENTION_MINUTES=$((14 * 24 * 60)); RETENTION_DESC="14 days" ;;
-    5) RETENTION_MINUTES=$((30 * 24 * 60)); RETENTION_DESC="30 days" ;;
-    6) RETENTION_MINUTES=$((60 * 24 * 60)); RETENTION_DESC="60 days" ;;
-    7) RETENTION_MINUTES=$((90 * 24 * 60)); RETENTION_DESC="90 days" ;;
-    8) RETENTION_MINUTES=$((365 * 24 * 60)); RETENTION_DESC="365 days" ;;
-    9) RETENTION_MINUTES=0; RETENTION_DESC="No automatic cleanup" ;;
+    1) RETENTION_DAYS=7; RETENTION_DESC="7 days" ;;
+    2) RETENTION_DAYS=14; RETENTION_DESC="14 days" ;;
+    3) RETENTION_DAYS=30; RETENTION_DESC="30 days" ;;
+    4) RETENTION_DAYS=60; RETENTION_DESC="60 days" ;;
+    5) RETENTION_DAYS=90; RETENTION_DESC="90 days" ;;
+    6) RETENTION_DAYS=365; RETENTION_DESC="365 days (1 year)" ;;
     *)
       print_error "Invalid option"
       press_enter_to_continue
@@ -185,28 +179,30 @@ change_retention_policy() {
       ;;
   esac
 
-  save_config "RETENTION_MINUTES" "$RETENTION_MINUTES"
+  save_config "RETENTION_DAYS" "$RETENTION_DAYS"
   save_config "RETENTION_DESC" "$RETENTION_DESC"
 
   # Regenerate backup scripts with new retention
-  local secrets_dir rclone_remote rclone_db_path rclone_files_path
+  local secrets_dir rclone_remote rclone_db_path rclone_files_path web_path_pattern webroot_subdir
   secrets_dir="$(get_secrets_dir)"
   rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
   rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
+  web_path_pattern="$(get_config_value 'WEB_PATH_PATTERN')"
+  webroot_subdir="$(get_config_value 'WEBROOT_SUBDIR')"
+
+  local do_database do_files
+  do_database="$(get_config_value 'DO_DATABASE')"
+  do_files="$(get_config_value 'DO_FILES')"
 
   echo
   echo "Regenerating backup scripts with new retention policy..."
 
-  if [[ -f "$SCRIPTS_DIR/db_backup.sh" ]] && [[ -n "$rclone_db_path" ]]; then
-    generate_db_backup_script "$secrets_dir" "$rclone_remote" "$rclone_db_path" "$INSTALL_DIR/logs" "$RETENTION_MINUTES"
-    print_success "Database backup script updated"
-  fi
+  generate_all_scripts "$secrets_dir" "$do_database" "$do_files" "$rclone_remote" \
+    "$rclone_db_path" "$rclone_files_path" "$RETENTION_DAYS" \
+    "${web_path_pattern:-/var/www/*}" "${webroot_subdir:-.}"
 
-  if [[ -f "$SCRIPTS_DIR/files_backup.sh" ]] && [[ -n "$rclone_files_path" ]]; then
-    generate_files_backup_script "$secrets_dir" "$rclone_remote" "$rclone_files_path" "$INSTALL_DIR/logs" "$RETENTION_MINUTES"
-    print_success "Files backup script updated"
-  fi
+  print_success "Backup scripts updated"
 
   echo
   print_success "Retention policy updated to: $RETENTION_DESC"

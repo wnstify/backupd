@@ -33,6 +33,7 @@ LIB_MODULES=(
     "debug.sh"
     "logging.sh"
     "crypto.sh"
+    "restic.sh"
     "config.sh"
     "generators.sh"
     "status.sh"
@@ -98,8 +99,8 @@ check_system() {
         echo -e "  OS: ${GREEN}$PRETTY_NAME${NC}"
     fi
 
-    # Check required commands
-    local required_cmds=("bash" "openssl" "gpg" "tar" "systemctl")
+    # Check required commands (v3.0: gpg removed - restic handles encryption)
+    local required_cmds=("bash" "openssl" "tar" "systemctl")
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
             echo -e "${RED}Error: Required command '$cmd' not found${NC}"
@@ -129,13 +130,18 @@ install_dependencies() {
     # Update package list (suppress output)
     apt-get update -qq 2>/dev/null || true
 
-    # Install pigz if not present
-    if ! command -v pigz &> /dev/null; then
-        echo -e "  Installing pigz..."
-        apt-get install -y -qq pigz 2>/dev/null || echo -e "  ${YELLOW}pigz install failed - will use gzip${NC}"
+    # Install restic if not present (with checksum verification)
+    # v3.0: restic replaces tar+pigz+GPG as the backup engine
+    if ! command -v restic &> /dev/null; then
+        echo -e "  Installing restic..."
+        install_restic_verified
     fi
-    if command -v pigz &> /dev/null; then
-        echo -e "  pigz: ${GREEN}OK${NC}"
+    if command -v restic &> /dev/null; then
+        local restic_version
+        restic_version=$(restic version 2>/dev/null | awk '{print $2}')
+        echo -e "  restic: ${GREEN}OK${NC} (${restic_version:-unknown})"
+    else
+        echo -e "  restic: ${YELLOW}Not installed - install manually${NC}"
     fi
 
     # Install argon2 for modern encryption (recommended)
@@ -274,6 +280,118 @@ install_rclone_verified() {
         return 0
     else
         echo -e "    ${YELLOW}Could not find rclone binary in archive${NC}"
+        return 1
+    fi
+}
+
+# Install restic with SHA256 verification
+# Downloads from GitHub releases with checksum validation
+install_restic_verified() {
+    local arch
+    local os="linux"
+
+    # Detect architecture
+    case "$(uname -m)" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        armv7l)  arch="arm" ;;
+        armv6l)  arch="arm" ;;
+        i686)    arch="386" ;;
+        *)
+            echo -e "    ${YELLOW}Unsupported architecture: $(uname -m)${NC}"
+            echo -e "    ${YELLOW}Please install restic manually: https://restic.net/${NC}"
+            return 1
+            ;;
+    esac
+
+    # Get latest version from GitHub API
+    local latest_version
+    latest_version=$(curl -sfL --proto '=https' --connect-timeout 10 \
+        "https://api.github.com/repos/restic/restic/releases/latest" 2>/dev/null | \
+        grep '"tag_name"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')
+
+    if [[ -z "$latest_version" ]]; then
+        echo -e "    ${YELLOW}Could not determine latest restic version${NC}"
+        echo -e "    ${YELLOW}Please install restic manually: https://restic.net/${NC}"
+        return 1
+    fi
+
+    echo -e "    Latest version: v${latest_version}"
+
+    local filename="restic_${latest_version}_${os}_${arch}.bz2"
+    local download_url="https://github.com/restic/restic/releases/download/v${latest_version}/${filename}"
+    local checksum_url="https://github.com/restic/restic/releases/download/v${latest_version}/SHA256SUMS"
+
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    trap "rm -rf '$temp_dir'" RETURN
+
+    # Download the archive
+    echo -e "    Downloading ${filename}..."
+    if ! curl -sfL --proto '=https' --connect-timeout 10 --max-time 300 \
+        "$download_url" -o "${temp_dir}/${filename}" 2>/dev/null; then
+        echo -e "    ${YELLOW}Failed to download restic${NC}"
+        return 1
+    fi
+
+    # Verify download is not empty
+    if [[ ! -s "${temp_dir}/${filename}" ]]; then
+        echo -e "    ${YELLOW}Downloaded file is empty${NC}"
+        return 1
+    fi
+
+    # Download checksum file
+    echo -e "    Verifying checksum..."
+    if ! curl -sfL --proto '=https' --connect-timeout 10 \
+        "$checksum_url" -o "${temp_dir}/SHA256SUMS" 2>/dev/null; then
+        echo -e "    ${YELLOW}Could not download checksum file${NC}"
+        echo -e "    ${YELLOW}Aborting - install restic manually for security${NC}"
+        return 1
+    fi
+
+    # Extract expected checksum
+    local expected_checksum
+    expected_checksum=$(grep "${filename}" "${temp_dir}/SHA256SUMS" 2>/dev/null | awk '{print $1}')
+
+    if [[ -z "$expected_checksum" ]]; then
+        echo -e "    ${YELLOW}Checksum not found for ${filename}${NC}"
+        echo -e "    ${YELLOW}Aborting - install restic manually for security${NC}"
+        return 1
+    fi
+
+    # Calculate actual checksum
+    local actual_checksum
+    actual_checksum=$(sha256sum "${temp_dir}/${filename}" | awk '{print $1}')
+
+    if [[ "$expected_checksum" != "$actual_checksum" ]]; then
+        echo -e "    ${RED}Checksum verification FAILED!${NC}"
+        echo -e "    ${RED}Expected: ${expected_checksum}${NC}"
+        echo -e "    ${RED}Got:      ${actual_checksum}${NC}"
+        echo -e "    ${RED}The download may be corrupted or tampered with${NC}"
+        return 1
+    fi
+
+    echo -e "    ${GREEN}Checksum verified${NC}"
+
+    # Extract and install (restic releases are bzip2 compressed binaries)
+    echo -e "    Installing..."
+
+    # Check if bzip2 is available
+    if ! command -v bunzip2 &>/dev/null; then
+        echo -e "    Installing bzip2..."
+        apt-get install -y -qq bzip2 2>/dev/null || {
+            echo -e "    ${YELLOW}Failed to install bzip2${NC}"
+            return 1
+        }
+    fi
+
+    # Decompress and install
+    if bunzip2 -c "${temp_dir}/${filename}" > /usr/bin/restic 2>/dev/null; then
+        chmod 755 /usr/bin/restic
+        echo -e "    ${GREEN}restic v${latest_version} installed successfully${NC}"
+        return 0
+    else
+        echo -e "    ${YELLOW}Failed to decompress restic binary${NC}"
         return 1
     fi
 }
@@ -627,7 +745,7 @@ uninstall() {
             if [[ -n "$secrets_dir" ]] && [[ -d "$secrets_dir" ]]; then
                 # Unlock files first (including .s salt file and .algo version marker)
                 chattr -i "$secrets_dir" 2>/dev/null || true
-                for f in ".s" ".algo" ".c1" ".c2" ".c3" ".c4" ".c5"; do
+                for f in ".s" ".algo" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".c8" ".c9"; do
                     [[ -f "$secrets_dir/$f" ]] && chattr -i "$secrets_dir/$f" 2>/dev/null || true
                 done
                 rm -rf "$secrets_dir"
@@ -638,7 +756,7 @@ uninstall() {
         for dir in /etc/.*; do
             if [[ -d "$dir" ]] && [[ -f "$dir/.c1" ]]; then
                 chattr -i "$dir" 2>/dev/null || true
-                for f in ".s" ".algo" ".c1" ".c2" ".c3" ".c4" ".c5"; do
+                for f in ".s" ".algo" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".c8" ".c9"; do
                     [[ -f "$dir/$f" ]] && chattr -i "$dir/$f" 2>/dev/null || true
                 done
                 rm -rf "$dir"

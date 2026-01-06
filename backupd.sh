@@ -15,7 +15,7 @@
 # ============================================================================
 set -euo pipefail
 
-VERSION="2.3.0"
+VERSION="3.0.0"
 AUTHOR="Backupd"
 WEBSITE="https://backupd.io"
 INSTALL_DIR="/etc/backupd"
@@ -52,6 +52,7 @@ source "$LIB_DIR/exitcodes.sh"  # Standardized exit codes (CLIG compliant)
 source "$LIB_DIR/debug.sh"      # Debug logging (must be early for other modules)
 source "$LIB_DIR/logging.sh"    # Comprehensive structured logging
 source "$LIB_DIR/crypto.sh"     # Encryption, secrets, key derivation
+source "$LIB_DIR/restic.sh"     # Restic backup engine operations (v3.0)
 source "$LIB_DIR/config.sh"     # Configuration read/write
 source "$LIB_DIR/generators.sh" # Script generation (needed by setup/schedule)
 source "$LIB_DIR/status.sh"     # Status display, view logs
@@ -426,38 +427,26 @@ do_migrate_encryption() {
 }
 
 regenerate_all_scripts() {
-  local secrets_dir rclone_remote rclone_db_path rclone_files_path retention_minutes
+  local secrets_dir rclone_remote rclone_db_path rclone_files_path retention_days
+  local web_path_pattern webroot_subdir do_database do_files
+
   secrets_dir="$(get_secrets_dir)"
   rclone_remote="$(get_config_value "RCLONE_REMOTE")"
   rclone_db_path="$(get_config_value "RCLONE_DB_PATH")"
   rclone_files_path="$(get_config_value "RCLONE_FILES_PATH")"
-  retention_minutes="$(get_config_value "RETENTION_MINUTES")"
-  retention_minutes="${retention_minutes:-43200}"
-
-  # Regenerate DB backup script if DB backup is enabled
-  local do_db
-  do_db="$(get_config_value "DO_DATABASE")"
-  if [[ "$do_db" == "true" ]]; then
-    generate_db_backup_script "$secrets_dir" "$rclone_remote" "$rclone_db_path" "$INSTALL_DIR/logs" "$retention_minutes"
-    generate_db_restore_script "$secrets_dir" "$rclone_remote" "$rclone_db_path"
-  fi
-
-  # Regenerate files backup script if files backup is enabled
-  local do_files
+  retention_days="$(get_config_value "RETENTION_DAYS")"
+  retention_days="${retention_days:-30}"
+  web_path_pattern="$(get_config_value "WEB_PATH_PATTERN")"
+  web_path_pattern="${web_path_pattern:-/var/www/*}"
+  webroot_subdir="$(get_config_value "WEBROOT_SUBDIR")"
+  webroot_subdir="${webroot_subdir:-.}"
+  do_database="$(get_config_value "DO_DATABASE")"
   do_files="$(get_config_value "DO_FILES")"
-  if [[ "$do_files" == "true" ]]; then
-    local web_path_pattern webroot_subdir
-    web_path_pattern="$(get_config_value "WEB_PATH_PATTERN")"
-    web_path_pattern="${web_path_pattern:-/var/www/*}"
-    webroot_subdir="$(get_config_value "WEBROOT_SUBDIR")"
-    webroot_subdir="${webroot_subdir:-.}"
-    generate_files_backup_script "$secrets_dir" "$rclone_remote" "$rclone_files_path" "$INSTALL_DIR/logs" "$retention_minutes" "$web_path_pattern" "$webroot_subdir"
-    generate_files_restore_script "$rclone_remote" "$rclone_files_path"
-  fi
 
-  # Regenerate verify scripts
-  generate_verify_script
-  generate_full_verify_script
+  # Regenerate all scripts using v3.0 unified generator
+  generate_all_scripts "$secrets_dir" "$do_database" "$do_files" "$rclone_remote" \
+    "$rclone_db_path" "$rclone_files_path" "$retention_days" \
+    "$web_path_pattern" "$webroot_subdir"
 }
 
 parse_arguments() {

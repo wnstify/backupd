@@ -4,9 +4,10 @@
 
 | Version | Supported          |
 |---------|--------------------|
+| 3.0.x   | :white_check_mark: |
 | 2.3.x   | :white_check_mark: |
 | 2.2.x   | :white_check_mark: |
-| 2.1.x   | :white_check_mark: |
+| 2.1.x   | :x:                |
 | 2.0.x   | :x:                |
 | 1.6.x   | :x:                |
 | 1.5.x   | :x:                |
@@ -154,7 +155,7 @@ The following secrets are encrypted and stored securely:
 | Credential harvesting scripts | :white_check_mark: Yes | No plain-text credentials |
 | Log file exposure | :white_check_mark: Yes | Passwords never logged |
 | Server migration/cloning | :white_check_mark: Yes | Credentials tied to machine-id |
-| Backup file theft | :white_check_mark: Yes | Backups encrypted with GPG |
+| Backup file theft | :white_check_mark: Yes | Backups encrypted with restic (AES-256-CTR + Poly1305) |
 | Man-in-the-middle | :white_check_mark: Yes | rclone uses TLS for transfers |
 | Attacker with root access | :warning: Partial | See limitations below |
 
@@ -295,13 +296,15 @@ The backup script uses secure practices:
 
 ## File Backup Security
 
-### Backup Encryption
+### Backup Encryption (v3.0+)
 
 | Component | Method |
 |-----------|--------|
-| Compression | pigz (parallel gzip) |
-| Encryption | GPG symmetric (AES-256) |
-| Integrity | SHA256 checksum |
+| Backup Engine | Restic (content-addressable deduplication) |
+| Encryption | Restic built-in AES-256-CTR + Poly1305-AES |
+| Compression | Restic built-in zstd |
+| Integrity | Restic built-in verification (cryptographic) |
+| Storage | rclone (transport to 40+ cloud providers) |
 
 ### What's Included
 
@@ -391,6 +394,7 @@ This tool is designed with security in mind but is provided "as is". Users are r
 
 | Version | Security Changes |
 |---------|-----------------|
+| 3.0.0 | Replaced GPG encryption with restic (AES-256-CTR + Poly1305-AES), removed pigz dependency, built-in deduplication and verification |
 | 2.3.0 | Pushover credentials encrypted with AES-256 (.c8, .c9), HTTPS-only API communication |
 | 2.2.11 | Passphrase redaction in logs (--passphrase VALUE and BACKUPD_PASSPHRASE=value now sanitized before logging) |
 | 2.2.0 | HTTPS enforcement for all notification URLs (ntfy + webhook), webhook notifications with optional Bearer auth, enhanced reconfigure warning |

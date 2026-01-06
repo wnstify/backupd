@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2026-01-06
+
+### Changed
+
+- **Complete Backup Engine Rewrite** - Replaced GPG+tar+pigz with restic
+  - Restic provides content-addressable deduplication (80-85% storage savings)
+  - Built-in AES-256 encryption (no separate GPG dependency)
+  - Built-in compression and verification
+  - Repository-based backup model with snapshots
+
+- **Retention Policy** - Now uses days instead of minutes
+  - Config key changed: `RETENTION_MINUTES` -> `RETENTION_DAYS`
+  - Cleaner configuration (e.g., `RETENTION_DAYS="30"` instead of `RETENTION_MINUTES="43200"`)
+  - Options: 7, 14, 30, 60, 90, 365 days
+
+- **Encryption Password** - Renamed to "Repository Password"
+  - More accurate terminology for restic's password model
+  - Same encryption strength (AES-256)
+
+- **Setup Wizard Simplified**
+  - Removed testing retention options (1 min, 1 hour)
+  - Removed "No automatic cleanup" option
+  - Streamlined retention selection
+
+### Added
+
+- **New `lib/restic.sh` Module** - Dedicated restic operations
+  - `init_restic_repo()` - Initialize restic repository
+  - `run_restic_backup()` - Execute backup with progress
+  - `run_restic_forget()` - Apply retention policy
+  - `run_restic_check()` - Verify repository integrity
+  - `list_restic_snapshots()` - List available backups
+  - `restore_restic_snapshot()` - Restore from snapshot
+
+- **Restic Repository Initialization**
+  - Automatic during setup wizard
+  - Creates repository on remote storage
+  - Password-protected with user's encryption password
+
+- **Built-in Verification**
+  - `restic check` validates repository integrity
+  - No separate checksum files needed
+  - Faster verification than download+decrypt
+
+### Removed
+
+- **GPG Dependency** - No longer required for backup encryption
+  - Restic handles all encryption internally
+  - GPG may still be installed for other purposes
+
+- **pigz Dependency** - No longer required for compression
+  - Restic handles compression internally
+  - More efficient deduplication-aware compression
+
+- **Legacy tar-based Backup Scripts**
+  - Old backup format no longer generated
+  - Restore still supports legacy format for migration
+
+- **Testing Retention Options**
+  - Removed 1 minute and 1 hour testing options
+  - Production-focused retention choices only
+
+- **No Automatic Cleanup Option**
+  - All installations now have retention policy
+  - Prevents unbounded storage growth
+
+### Migration
+
+- **Existing v2.x installations**: Run setup wizard to migrate to restic
+- **Existing backups**: Legacy tar.gz.gpg backups remain accessible for restore
+- **New backups**: All new backups use restic format
+
+### Technical
+
+- New config value: `RESTIC_REPO_INITIALIZED` (true/false)
+- Backup script generation updated for restic commands
+- Generated scripts embed restic functions from lib/restic.sh
+- Repository password stored using existing secure credential system
+
+---
+
 ## [2.3.0] - 2026-01-06
 
 ### Added
@@ -1074,6 +1155,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.0.0 | 2026-01-06 | **Major release**: Restic backup engine, deduplication, retention in days |
 | 2.3.0 | 2026-01-06 | Pushover notifications, priority-based sound alerts, CLI notifications subcommand |
 | 2.2.11 | 2026-01-06 | REST API support flags, progress file tracking, global flags fix, passphrase redaction |
 | 2.2.10 | 2026-01-05 | Installer missing library files fix |

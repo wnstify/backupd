@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Backupd - Verify Module
-# Backup integrity verification functions
+# Backupd v3.0 - Verify Module (Restic-Based)
+# Backup integrity verification using restic check commands
+#
+# v3.0 Changes:
+#   - Replaced checksum-based verification with `restic check`
+#   - Replaced GPG decrypt verification with `restic check --read-data`
+#   - Simplified from ~570 lines to ~200 lines
 # ============================================================================
 
 # Last full verification tracking file
 LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
 FULL_VERIFY_INTERVAL_DAYS=30
 
-# ---------- Quick Verification (Checksum-only, no download) ----------
-# Optimized: Uses only 1 API call per backup type (lists all files at once)
+# ---------- Quick Verification (Metadata-only, no download) ----------
+# Uses: restic check (fast, verifies repository structure and index)
 
 verify_quick() {
-  log_func_enter
-  debug_enter "verify_quick" "$1"
+  log_func_enter 2>/dev/null || true
+  debug_enter "verify_quick" "$1" 2>/dev/null || true
   local backup_type="$1"  # "db", "files", or "both"
   local secrets_dir rclone_remote rclone_db_path rclone_files_path
   secrets_dir="$(get_secrets_dir)"
@@ -21,148 +26,243 @@ verify_quick() {
   rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
 
+  # Get restic repository password
+  local restic_password
+  restic_password="$(get_secret "$secrets_dir" ".c1")"
+  if [[ -z "$restic_password" ]]; then
+    print_error "No repository password found in secrets"
+    return 1
+  fi
+
   local db_result="SKIPPED" files_result="SKIPPED"
   local db_details="" files_details=""
+  local hostname
+  hostname="$(hostname -f 2>/dev/null || hostname)"
 
-  # Helper to format size
-  format_size() {
-    numfmt --to=iec-i --suffix=B "$1" 2>/dev/null || echo "${1}B"
-  }
-
-  # Check ALL database backups (single API call)
+  # Check database repository (quick - metadata only)
   if [[ "$backup_type" == "db" || "$backup_type" == "both" ]] && [[ -n "$rclone_db_path" ]]; then
-    echo "Checking database backups (quick)..."
+    local repo="rclone:${rclone_remote}:${rclone_db_path}"
+    echo "Checking database repository (quick)..."
+    echo "  Repository: $repo"
+    echo
 
-    local db_total=0 db_with_checksum=0 db_without_checksum=0 db_total_size=0
-    declare -A checksum_files=()
-
-    # Single API call: get all files with sizes
-    local all_files
-    all_files=$(rclone lsl "$rclone_remote:$rclone_db_path" 2>/dev/null)
-
-    # Build set of checksum files and process backups
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
-      local size filename
-      size=$(echo "$line" | awk '{print $1}')
-      filename=$(echo "$line" | awk '{print $NF}')
-
-      if [[ "$filename" == *.sha256 ]]; then
-        checksum_files["$filename"]=1
-      elif [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
-        ((db_total++)) || true
-        db_total_size=$((db_total_size + size))
-
-        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
-          ((db_with_checksum++)) || true
-        else
-          # Check if checksum exists (might come later in list)
-          :
-        fi
-      fi
-    done <<< "$all_files"
-
-    # Second pass: check which backups have checksums
-    db_with_checksum=0
-    db_without_checksum=0
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
-      local filename
-      filename=$(echo "$line" | awk '{print $NF}')
-
-      if [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
-        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
-          ((db_with_checksum++)) || true
-        else
-          ((db_without_checksum++)) || true
-          echo "  Missing checksum: $filename"
-        fi
-      fi
-    done <<< "$all_files"
-
-    if [[ $db_total -eq 0 ]]; then
-      db_result="FAILED"
-      db_details="No backups found"
-    elif [[ $db_without_checksum -gt 0 ]]; then
-      db_result="WARNING"
-      db_details="$db_total backups ($(format_size "$db_total_size")), $db_without_checksum missing checksums"
-    else
+    local check_output
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check 2>&1); then
       db_result="PASSED"
-      db_details="$db_total backups ($(format_size "$db_total_size")), all have checksums"
-    fi
-
-    if [[ "$db_result" == "PASSED" ]]; then
-      print_success "Database: $db_details"
-    elif [[ "$db_result" == "WARNING" ]]; then
-      print_warning "Database: $db_details"
+      # Get snapshot count for details
+      local snapshot_count
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+      db_details="Repository OK, $snapshot_count snapshot(s)"
+      print_success "Database repository: $db_details"
     else
-      print_error "Database: $db_details"
+      db_result="FAILED"
+      # Extract error from output
+      local error_msg
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      db_details="${error_msg:-Repository check failed}"
+      print_error "Database repository: $db_details"
+      echo "$check_output" | head -10
     fi
+    echo
   fi
 
-  # Check ALL files backups (single API call)
+  # Check files repository (quick - metadata only)
   if [[ "$backup_type" == "files" || "$backup_type" == "both" ]] && [[ -n "$rclone_files_path" ]]; then
-    echo "Checking files backups (quick)..."
+    local repo="rclone:${rclone_remote}:${rclone_files_path}"
+    echo "Checking files repository (quick)..."
+    echo "  Repository: $repo"
+    echo
 
-    local files_total=0 files_with_checksum=0 files_without_checksum=0 files_total_size=0
-    declare -A checksum_files=()
-
-    # Single API call: get all files with sizes
-    local all_files
-    all_files=$(rclone lsl "$rclone_remote:$rclone_files_path" 2>/dev/null)
-
-    # First pass: build checksum set and count backups
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
-      local size filename
-      size=$(echo "$line" | awk '{print $1}')
-      filename=$(echo "$line" | awk '{print $NF}')
-
-      if [[ "$filename" == *.sha256 ]]; then
-        checksum_files["$filename"]=1
-      elif [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
-        ((files_total++)) || true
-        files_total_size=$((files_total_size + size))
-      fi
-    done <<< "$all_files"
-
-    # Second pass: check which backups have checksums
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
-      local filename
-      filename=$(echo "$line" | awk '{print $NF}')
-
-      if [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
-        if [[ -n "${checksum_files[${filename}.sha256]:-}" ]]; then
-          ((files_with_checksum++)) || true
-        else
-          ((files_without_checksum++)) || true
-          echo "  Missing checksum: $filename"
-        fi
-      fi
-    done <<< "$all_files"
-
-    if [[ $files_total -eq 0 ]]; then
-      files_result="FAILED"
-      files_details="No backups found"
-    elif [[ $files_without_checksum -gt 0 ]]; then
-      files_result="WARNING"
-      files_details="$files_total backups ($(format_size "$files_total_size")), $files_without_checksum missing checksums"
-    else
+    local check_output
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check 2>&1); then
       files_result="PASSED"
-      files_details="$files_total backups ($(format_size "$files_total_size")), all have checksums"
-    fi
-
-    if [[ "$files_result" == "PASSED" ]]; then
-      print_success "Files: $files_details"
-    elif [[ "$files_result" == "WARNING" ]]; then
-      print_warning "Files: $files_details"
+      local snapshot_count
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+      files_details="Repository OK, $snapshot_count snapshot(s)"
+      print_success "Files repository: $files_details"
     else
-      print_error "Files: $files_details"
+      files_result="FAILED"
+      local error_msg
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      files_details="${error_msg:-Repository check failed}"
+      print_error "Files repository: $files_details"
+      echo "$check_output" | head -10
+    fi
+    echo
+  fi
+
+  # Send notifications (ntfy + webhook)
+  send_verify_notification "quick" "$db_result" "$files_result" "$db_details" "$files_details"
+
+  # Return status
+  if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# ---------- Full Verification (Downloads and verifies all data) ----------
+# Uses: restic check --read-data (thorough, downloads all pack files)
+
+verify_full() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "verify_full" "$1" 2>/dev/null || true
+  local backup_type="$1"  # "db", "files", or "both"
+  local secrets_dir rclone_remote rclone_db_path rclone_files_path
+  secrets_dir="$(get_secrets_dir)"
+  rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
+  rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
+  rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
+
+  # Get restic repository password
+  local restic_password
+  restic_password="$(get_secret "$secrets_dir" ".c1")"
+  if [[ -z "$restic_password" ]]; then
+    print_error "No repository password found in secrets"
+    return 1
+  fi
+
+  local db_result="SKIPPED" files_result="SKIPPED"
+  local db_details="" files_details=""
+  local hostname
+  hostname="$(hostname -f 2>/dev/null || hostname)"
+
+  # Full check database repository (downloads and verifies all data)
+  if [[ "$backup_type" == "db" || "$backup_type" == "both" ]] && [[ -n "$rclone_db_path" ]]; then
+    local repo="rclone:${rclone_remote}:${rclone_db_path}"
+    echo
+    echo "============================================="
+    echo "Full Verification: Database Repository"
+    echo "============================================="
+    echo
+    echo "  Repository: $repo"
+    echo "  This will download and verify ALL backup data."
+    echo "  This may take a long time for large repositories."
+    echo
+    print_info "Starting full verification (restic check --read-data)..."
+    echo
+
+    local start_time check_output
+    start_time=$(date +%s)
+
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --read-data 2>&1); then
+      local end_time duration
+      end_time=$(date +%s)
+      duration=$((end_time - start_time))
+
+      db_result="PASSED"
+
+      # Get repository stats
+      local repo_stats snapshot_count total_size
+      repo_stats=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" stats --json 2>/dev/null || echo "{}")
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+      total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+      total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
+
+      db_details="All data verified OK ($snapshot_count snapshots, $total_size_human, ${duration}s)"
+      print_success "Database repository: $db_details"
+    else
+      db_result="FAILED"
+      local error_msg
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      db_details="${error_msg:-Full verification failed}"
+      print_error "Database repository: $db_details"
+      echo "$check_output" | head -20
     fi
   fi
 
-  # Send notification (ntfy + webhook)
+  # Full check files repository (downloads and verifies all data)
+  if [[ "$backup_type" == "files" || "$backup_type" == "both" ]] && [[ -n "$rclone_files_path" ]]; then
+    local repo="rclone:${rclone_remote}:${rclone_files_path}"
+    echo
+    echo "============================================="
+    echo "Full Verification: Files Repository"
+    echo "============================================="
+    echo
+    echo "  Repository: $repo"
+    echo "  This will download and verify ALL backup data."
+    echo "  This may take a long time for large repositories."
+    echo
+    print_info "Starting full verification (restic check --read-data)..."
+    echo
+
+    local start_time check_output
+    start_time=$(date +%s)
+
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --read-data 2>&1); then
+      local end_time duration
+      end_time=$(date +%s)
+      duration=$((end_time - start_time))
+
+      files_result="PASSED"
+
+      local repo_stats snapshot_count total_size
+      repo_stats=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" stats --json 2>/dev/null || echo "{}")
+      snapshot_count=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+      total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+      total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
+
+      files_details="All data verified OK ($snapshot_count snapshots, $total_size_human, ${duration}s)"
+      print_success "Files repository: $files_details"
+    else
+      files_result="FAILED"
+      local error_msg
+      error_msg=$(echo "$check_output" | grep -i "error\|fatal" | head -1)
+      files_details="${error_msg:-Full verification failed}"
+      print_error "Files repository: $files_details"
+      echo "$check_output" | head -20
+    fi
+  fi
+
+  # Summary
+  echo
+  echo "============================================="
+  echo "Verification Summary"
+  echo "============================================="
+  echo
+
+  if [[ "$db_result" != "SKIPPED" ]]; then
+    if [[ "$db_result" == "PASSED" ]]; then
+      print_success "Database: PASSED - $db_details"
+    else
+      print_error "Database: FAILED - $db_details"
+    fi
+  fi
+
+  if [[ "$files_result" != "SKIPPED" ]]; then
+    if [[ "$files_result" == "PASSED" ]]; then
+      print_success "Files: PASSED - $files_details"
+    else
+      print_error "Files: FAILED - $files_details"
+    fi
+  fi
+
+  # Send notifications
+  send_verify_notification "full" "$db_result" "$files_result" "$db_details" "$files_details"
+
+  # Mark full verification as done if at least one type passed
+  if [[ "$db_result" == "PASSED" || "$files_result" == "PASSED" ]]; then
+    mark_full_verify_done
+    echo
+    print_info "Full verification timestamp recorded."
+  fi
+
+  # Return status
+  if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# ---------- Send Verification Notification ----------
+
+send_verify_notification() {
+  local verify_type="$1"  # "quick" or "full"
+  local db_result="$2"
+  local files_result="$3"
+  local db_details="$4"
+  local files_details="$5"
+
   local secrets_dir ntfy_url ntfy_token webhook_url webhook_token
   secrets_dir="$(get_secrets_dir)"
   ntfy_url="$(get_secret "$secrets_dir" ".c5" 2>/dev/null || echo "")"
@@ -174,15 +274,15 @@ verify_quick() {
   local hostname
   hostname="$(hostname -f 2>/dev/null || hostname)"
 
+  local check_type_label
+  [[ "$verify_type" == "quick" ]] && check_type_label="Quick Check" || check_type_label="Full Verification"
+
   if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-    notification_title="Quick Check FAILED on $hostname"
-    event_type="verify_failed"
-  elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
-    notification_title="Quick Check WARNING on $hostname"
-    event_type="verify_warning"
+    notification_title="$check_type_label FAILED on $hostname"
+    event_type="${verify_type}_verify_failed"
   else
-    notification_title="Quick Check PASSED on $hostname"
-    event_type="verify_passed"
+    notification_title="$check_type_label PASSED on $hostname"
+    event_type="${verify_type}_verify_passed"
   fi
 
   notification_body="DB: $db_result${db_details:+ ($db_details)}, Files: $files_result${files_details:+ ($files_details)}"
@@ -200,24 +300,16 @@ verify_quick() {
   if [[ -n "$webhook_url" ]]; then
     local timestamp json_payload
     timestamp="$(date -Iseconds)"
-    json_payload="{\"event\":\"$event_type\",\"title\":\"$notification_title\",\"hostname\":\"$hostname\",\"message\":\"$notification_body\",\"timestamp\":\"$timestamp\",\"details\":{\"db_result\":\"$db_result\",\"files_result\":\"$files_result\"}}"
+    json_payload="{\"event\":\"$event_type\",\"title\":\"$notification_title\",\"hostname\":\"$hostname\",\"message\":\"$notification_body\",\"timestamp\":\"$timestamp\",\"details\":{\"db_result\":\"$db_result\",\"files_result\":\"$files_result\",\"verify_type\":\"$verify_type\"}}"
     if [[ -n "$webhook_token" ]]; then
       curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -H "Authorization: Bearer $webhook_token" -d "$json_payload" -o /dev/null --max-time 10 || true
     else
       curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -d "$json_payload" -o /dev/null --max-time 10 || true
     fi
   fi
-
-  # Return status
-  if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-    return 1
-  elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
-    return 2
-  fi
-  return 0
 }
 
-# ---------- Check if full verification is due ----------
+# ---------- Full Verification Tracking ----------
 
 check_full_verify_due() {
   if [[ ! -f "$LAST_FULL_VERIFY_FILE" ]]; then
@@ -238,28 +330,26 @@ check_full_verify_due() {
   echo "$days_since"
 }
 
-# Mark full verification as completed
 mark_full_verify_done() {
   date +%s > "$LAST_FULL_VERIFY_FILE"
   chmod 600 "$LAST_FULL_VERIFY_FILE" 2>/dev/null
 }
 
-# Show reminder if full test is due
 show_full_verify_reminder() {
   local days_since
   days_since=$(check_full_verify_due)
 
   if [[ "$days_since" == "never" ]]; then
     echo
-    print_warning "You have never performed a full backup test!"
-    echo "  A full test downloads and verifies backup decryption/contents."
+    print_warning "You have never performed a full backup verification!"
+    echo "  A full verification downloads and verifies all backup data."
     echo "  This confirms your backups are actually restorable."
     echo
   elif [[ "$days_since" -ge "$FULL_VERIFY_INTERVAL_DAYS" ]]; then
     echo
-    print_warning "Last full backup test was $days_since days ago."
-    echo "  Recommended: Run a full verification test at least every 30 days."
-    echo "  Quick checks only verify files exist, not that they're valid."
+    print_warning "Last full backup verification was $days_since days ago."
+    echo "  Recommended: Run a full verification at least every 30 days."
+    echo "  Quick checks only verify metadata, not actual data integrity."
     echo
   fi
 }
@@ -267,12 +357,13 @@ show_full_verify_reminder() {
 # ---------- Verify Backup Integrity (Menu) ----------
 
 verify_backup_integrity() {
-  log_func_enter
-  debug_enter "verify_backup_integrity"
+  log_func_enter 2>/dev/null || true
+  debug_enter "verify_backup_integrity" 2>/dev/null || true
+
   while true; do
     print_header
-    echo "Verify Backup Integrity"
-    echo "======================="
+    echo "Verify Backup Integrity (Restic)"
+    echo "================================="
     echo
 
     # Show reminder if full test is due
@@ -281,17 +372,19 @@ verify_backup_integrity() {
     echo "Verification Options:"
     echo
     echo -e "  ${CYAN}Quick Check${NC} (recommended for scheduled runs)"
-    echo "  Verifies backups exist with checksums. No download required."
+    echo "  Verifies repository structure and index. No data download."
+    echo "  Uses: restic check"
     echo
-    echo -e "  ${CYAN}Full Test${NC} (recommended monthly)"
-    echo "  Downloads and fully verifies backup decryption and contents."
+    echo -e "  ${CYAN}Full Verification${NC} (recommended monthly)"
+    echo "  Downloads and verifies ALL backup data integrity."
+    echo "  Uses: restic check --read-data"
     echo
     echo "1. Quick check - Database"
     echo "2. Quick check - Files"
     echo "3. Quick check - Both"
-    echo "4. Full test - Database (downloads backup)"
-    echo "5. Full test - Files (downloads backup)"
-    echo "6. Full test - Both (downloads backups)"
+    echo "4. Full verification - Database (downloads all data)"
+    echo "5. Full verification - Files (downloads all data)"
+    echo "6. Full verification - Both (downloads all data)"
     echo "7. Back"
     echo
     read -p "Select option [1-7]: " verify_choice
@@ -301,272 +394,56 @@ verify_backup_integrity() {
         echo
         verify_quick "db"
         press_enter_to_continue
-        continue
         ;;
       2)
         echo
         verify_quick "files"
         press_enter_to_continue
-        continue
         ;;
       3)
         echo
         verify_quick "both"
         press_enter_to_continue
+        ;;
+      4)
+        echo
+        echo -e "${YELLOW}WARNING: Full verification will download ALL database backup data.${NC}"
+        echo -e "${YELLOW}This may take a long time and use significant bandwidth.${NC}"
+        echo
+        read -p "Continue? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy] ]]; then
+          verify_full "db"
+        fi
+        press_enter_to_continue
+        ;;
+      5)
+        echo
+        echo -e "${YELLOW}WARNING: Full verification will download ALL files backup data.${NC}"
+        echo -e "${YELLOW}This may take a long time and use significant bandwidth.${NC}"
+        echo
+        read -p "Continue? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy] ]]; then
+          verify_full "files"
+        fi
+        press_enter_to_continue
+        ;;
+      6)
+        echo
+        echo -e "${YELLOW}WARNING: Full verification will download ALL backup data (DB + Files).${NC}"
+        echo -e "${YELLOW}This may take a very long time and use significant bandwidth.${NC}"
+        echo
+        read -p "Continue? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy] ]]; then
+          verify_full "both"
+        fi
+        press_enter_to_continue
+        ;;
+      7|"")
+        return
+        ;;
+      *)
         continue
         ;;
-      4) verify_choice="1" ;;  # Map to original full test options
-      5) verify_choice="2" ;;
-      6) verify_choice="3" ;;
-      7|"") return ;;
-      *) continue ;;
     esac
-
-  # Continue with full verification (original logic below)
-
-  local secrets_dir rclone_remote rclone_db_path rclone_files_path
-  secrets_dir="$(get_secrets_dir)"
-  rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
-  rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
-  rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
-
-  local db_result="SKIPPED" files_result="SKIPPED"
-  local db_details="" files_details=""
-
-  # Create temp directory
-  local temp_dir
-  temp_dir=$(mktemp -d)
-  trap "rm -rf '$temp_dir'" RETURN
-
-  # Verify database backup
-  if [[ "$verify_choice" == "1" || "$verify_choice" == "3" ]]; then
-    echo
-    echo "═══════════════════════════════════════"
-    echo "Verifying Database Backup"
-    echo "═══════════════════════════════════════"
-    echo
-
-    # Get latest DB backup
-    echo "Fetching latest database backup..."
-    local latest_db
-    latest_db=$(rclone lsf "$rclone_remote:$rclone_db_path" --include "*-db_backups-*.tar.gz.gpg" 2>/dev/null | sort -r | head -1)
-
-    if [[ -z "$latest_db" ]]; then
-      print_error "No database backups found"
-      db_result="FAILED"
-      db_details="No backups found"
-    else
-      echo "Latest backup: $latest_db"
-
-      # Download backup
-      echo "Downloading backup..."
-      if ! rclone copy "$rclone_remote:$rclone_db_path/$latest_db" "$temp_dir/" --progress; then
-        print_error "Download failed"
-        db_result="FAILED"
-        db_details="Download failed"
-      else
-        # Download checksum if exists
-        local checksum_file="${latest_db}.sha256"
-        rclone copy "$rclone_remote:$rclone_db_path/$checksum_file" "$temp_dir/" 2>/dev/null
-
-        # Verify checksum
-        if [[ -f "$temp_dir/$checksum_file" ]]; then
-          echo "Verifying checksum..."
-          local stored_checksum calculated_checksum
-          stored_checksum=$(cat "$temp_dir/$checksum_file")
-          calculated_checksum=$(sha256sum "$temp_dir/$latest_db" | awk '{print $1}')
-
-          if [[ "$stored_checksum" == "$calculated_checksum" ]]; then
-            print_success "Checksum verified"
-          else
-            print_error "Checksum mismatch!"
-            echo "  Expected: $stored_checksum"
-            echo "  Got:      $calculated_checksum"
-            db_result="FAILED"
-            db_details="Checksum mismatch"
-          fi
-        else
-          print_warning "No checksum file found (backup may predate checksum feature)"
-        fi
-
-        # Test decryption if checksum passed or no checksum
-        if [[ "$db_result" != "FAILED" ]]; then
-          echo "Testing decryption..."
-          echo
-          read -s -p "Enter encryption password: " passphrase
-          echo
-
-          if gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
-            print_success "Decryption and archive verified"
-
-            # List contents
-            echo
-            echo "Archive contents:"
-            gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | head -20
-            local file_count
-            file_count=$(gpg --batch --quiet --pinentry-mode=loopback --passphrase "$passphrase" -d "$temp_dir/$latest_db" 2>/dev/null | tar -tzf - 2>/dev/null | wc -l)
-            echo "... ($file_count files total)"
-
-            db_result="PASSED"
-            db_details="$latest_db - $file_count files"
-          else
-            print_error "Decryption or archive verification failed"
-            db_result="FAILED"
-            db_details="Decryption failed - wrong password?"
-          fi
-        fi
-      fi
-    fi
-  fi
-
-  # Verify files backup
-  if [[ "$verify_choice" == "2" || "$verify_choice" == "3" ]]; then
-    echo
-    echo "═══════════════════════════════════════"
-    echo "Verifying Files Backup"
-    echo "═══════════════════════════════════════"
-    echo
-
-    # Get latest files backup
-    echo "Fetching latest files backup..."
-    local latest_files
-    latest_files=$(rclone lsf "$rclone_remote:$rclone_files_path" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r | head -1)
-
-    if [[ -z "$latest_files" ]]; then
-      print_error "No files backups found"
-      files_result="FAILED"
-      files_details="No backups found"
-    else
-      echo "Latest backup: $latest_files"
-
-      # Download backup
-      echo "Downloading backup..."
-      if ! rclone copy "$rclone_remote:$rclone_files_path/$latest_files" "$temp_dir/" --progress; then
-        print_error "Download failed"
-        files_result="FAILED"
-        files_details="Download failed"
-      else
-        # Download checksum if exists
-        local checksum_file="${latest_files}.sha256"
-        rclone copy "$rclone_remote:$rclone_files_path/$checksum_file" "$temp_dir/" 2>/dev/null
-
-        # Verify checksum
-        if [[ -f "$temp_dir/$checksum_file" ]]; then
-          echo "Verifying checksum..."
-          local stored_checksum calculated_checksum
-          stored_checksum=$(cat "$temp_dir/$checksum_file")
-          calculated_checksum=$(sha256sum "$temp_dir/$latest_files" | awk '{print $1}')
-
-          if [[ "$stored_checksum" == "$calculated_checksum" ]]; then
-            print_success "Checksum verified"
-          else
-            print_error "Checksum mismatch!"
-            echo "  Expected: $stored_checksum"
-            echo "  Got:      $calculated_checksum"
-            files_result="FAILED"
-            files_details="Checksum mismatch"
-          fi
-        else
-          print_warning "No checksum file found (backup may predate checksum feature)"
-        fi
-
-        # Test archive integrity if checksum passed or no checksum
-        if [[ "$files_result" != "FAILED" ]]; then
-          echo "Testing archive integrity..."
-
-          if tar -tzf "$temp_dir/$latest_files" >/dev/null 2>&1; then
-            print_success "Archive verified"
-
-            # List contents (|| true to prevent SIGPIPE exit with pipefail)
-            echo
-            echo "Archive contents:"
-            tar -tzf "$temp_dir/$latest_files" 2>/dev/null | head -20 || true
-            local file_count
-            file_count=$(tar -tzf "$temp_dir/$latest_files" 2>/dev/null | wc -l) || file_count=0
-            echo "... ($file_count files total)"
-
-            files_result="PASSED"
-            files_details="$latest_files - $file_count files"
-          else
-            print_error "Archive verification failed - file may be corrupted"
-            files_result="FAILED"
-            files_details="Archive corrupted"
-          fi
-        fi
-      fi
-    fi
-  fi
-
-  # Summary
-  echo
-  echo "═══════════════════════════════════════"
-  echo "Verification Summary"
-  echo "═══════════════════════════════════════"
-  echo
-
-  if [[ "$db_result" != "SKIPPED" ]]; then
-    if [[ "$db_result" == "PASSED" ]]; then
-      print_success "Database: PASSED - $db_details"
-    else
-      print_error "Database: FAILED - $db_details"
-    fi
-  fi
-
-  if [[ "$files_result" != "SKIPPED" ]]; then
-    if [[ "$files_result" == "PASSED" ]]; then
-      print_success "Files: PASSED - $files_details"
-    else
-      print_error "Files: FAILED - $files_details"
-    fi
-  fi
-
-  # Send notification (ntfy + webhook)
-  local ntfy_url ntfy_token webhook_url webhook_token
-  ntfy_url="$(get_secret "$secrets_dir" ".c5" 2>/dev/null || echo "")"
-  ntfy_token="$(get_secret "$secrets_dir" ".c4" 2>/dev/null || echo "")"
-  webhook_url="$(get_secret "$secrets_dir" ".c6" 2>/dev/null || echo "")"
-  webhook_token="$(get_secret "$secrets_dir" ".c7" 2>/dev/null || echo "")"
-
-  local notification_title notification_body event_type
-
-  if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-    notification_title="Backup Verification FAILED on $HOSTNAME"
-    notification_body="DB: $db_result, Files: $files_result"
-    event_type="full_verify_failed"
-  else
-    notification_title="Backup Verification PASSED on $HOSTNAME"
-    notification_body="DB: $db_result, Files: $files_result"
-    event_type="full_verify_passed"
-  fi
-
-  # Send ntfy notification
-  if [[ -n "$ntfy_url" ]]; then
-    if [[ -n "$ntfy_token" ]]; then
-      curl -s -H "Authorization: Bearer $ntfy_token" -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
-    else
-      curl -s -H "Title: $notification_title" -d "$notification_body" "$ntfy_url" -o /dev/null --max-time 10 || true
-    fi
-  fi
-
-  # Send webhook notification
-  if [[ -n "$webhook_url" ]]; then
-    local timestamp json_payload
-    timestamp="$(date -Iseconds)"
-    json_payload="{\"event\":\"$event_type\",\"title\":\"$notification_title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$notification_body\",\"timestamp\":\"$timestamp\",\"details\":{\"db_result\":\"$db_result\",\"files_result\":\"$files_result\"}}"
-    if [[ -n "$webhook_token" ]]; then
-      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -H "Authorization: Bearer $webhook_token" -d "$json_payload" -o /dev/null --max-time 10 || true
-    else
-      curl -s -X POST "$webhook_url" -H "Content-Type: application/json" -d "$json_payload" -o /dev/null --max-time 10 || true
-    fi
-  fi
-
-  # Mark full verification as done if at least one type passed
-  if [[ "$db_result" == "PASSED" || "$files_result" == "PASSED" ]]; then
-    mark_full_verify_done
-    echo
-    print_info "Full verification timestamp recorded."
-  fi
-
-  press_enter_to_continue
-  done  # End of while loop
+  done
 }

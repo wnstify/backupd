@@ -92,21 +92,21 @@ run_cleanup_now() {
   echo "==============="
   echo
 
-  local retention_minutes retention_desc
-  retention_minutes="$(get_config_value 'RETENTION_MINUTES')"
+  local retention_days retention_desc
+  retention_days="$(get_config_value 'RETENTION_DAYS')"
   retention_desc="$(get_config_value 'RETENTION_DESC')"
 
-  if [[ -z "$retention_minutes" ]] || [[ "$retention_minutes" -eq 0 ]]; then
-    print_warning "No retention policy configured (automatic cleanup disabled)"
+  if [[ -z "$retention_days" ]] || [[ "$retention_days" -eq 0 ]]; then
+    print_warning "No retention policy configured"
     echo
-    echo "To enable cleanup, go to: Manage schedules > Change retention policy"
+    echo "To configure, go to: Manage schedules > Change retention policy"
     press_enter_to_continue
     return
   fi
 
   echo "Current retention policy: $retention_desc"
   echo
-  echo "This will delete backups older than $retention_minutes minutes."
+  echo "This will remove snapshots older than $retention_days days and prune unused data."
   echo
   read -p "Continue? (y/N): " confirm
 
@@ -121,72 +121,58 @@ run_cleanup_now() {
   rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
 
-  local cutoff_time cleanup_count=0 cleanup_errors=0
-  cutoff_time=$(date -d "-$retention_minutes minutes" +%s 2>/dev/null || date -v-${retention_minutes}M +%s 2>/dev/null || echo 0)
+  # Get restic password from secrets
+  local secrets_dir restic_password
+  secrets_dir="$(get_secrets_dir)"
+  restic_password="$(get_secret "$secrets_dir" ".c1" 2>/dev/null || echo "")"
 
-  if [[ "$cutoff_time" -eq 0 ]]; then
-    print_error "Could not calculate cutoff time"
+  if [[ -z "$restic_password" ]]; then
+    print_error "Could not retrieve repository password"
     press_enter_to_continue
     return
   fi
 
-  echo
-  echo "Cutoff time: $(date -d "@$cutoff_time" 2>/dev/null || date -r "$cutoff_time" 2>/dev/null)"
-  echo
+  local cleanup_errors=0
 
-  # Cleanup database backups
+  # Cleanup database repository
   if [[ -n "$rclone_db_path" ]]; then
-    echo "Checking database backups at $rclone_remote:$rclone_db_path..."
-    while IFS= read -r remote_file; do
-      [[ -z "$remote_file" ]] && continue
-      file_time=$(rclone lsl "$rclone_remote:$rclone_db_path/$remote_file" 2>&1 | awk '{print $2" "$3}' | head -1)
-      if [[ -n "$file_time" && ! "$file_time" =~ ^ERROR ]]; then
-        file_epoch=$(date -d "$file_time" +%s 2>/dev/null || echo 0)
-        if [[ "$file_epoch" -gt 0 && "$file_epoch" -lt "$cutoff_time" ]]; then
-          echo "  Deleting: $remote_file ($(date -d "@$file_epoch" +"%Y-%m-%d %H:%M" 2>/dev/null))"
-          delete_output=$(rclone delete "$rclone_remote:$rclone_db_path/$remote_file" 2>&1)
-          if [[ $? -eq 0 ]]; then
-            ((cleanup_count++)) || true
-            # Also delete corresponding checksum file
-            rclone delete "$rclone_remote:$rclone_db_path/${remote_file}.sha256" 2>/dev/null || true
-          else
-            print_error "  Failed to delete $remote_file: $delete_output"
-            ((cleanup_errors++)) || true
-          fi
-        fi
-      fi
-    done < <(rclone lsf "$rclone_remote:$rclone_db_path" --include "*-db_backups-*.tar.gz.gpg" 2>&1)
+    local db_repo="rclone:${rclone_remote}:${rclone_db_path}"
+    echo
+    echo "Cleaning up database repository..."
+    echo "Repository: $db_repo"
+    echo "Retention: Keep snapshots within $retention_days days"
+    echo
+
+    if apply_retention_days "$db_repo" "$restic_password" "$retention_days" "" "false"; then
+      print_success "Database repository cleanup complete"
+    else
+      print_error "Database repository cleanup failed"
+      ((cleanup_errors++)) || true
+    fi
   fi
 
-  # Cleanup files backups
+  # Cleanup files repository
   if [[ -n "$rclone_files_path" ]]; then
-    echo "Checking files backups at $rclone_remote:$rclone_files_path..."
-    while IFS= read -r remote_file; do
-      [[ -z "$remote_file" ]] && continue
-      file_time=$(rclone lsl "$rclone_remote:$rclone_files_path/$remote_file" 2>&1 | awk '{print $2" "$3}' | head -1)
-      if [[ -n "$file_time" && ! "$file_time" =~ ^ERROR ]]; then
-        file_epoch=$(date -d "$file_time" +%s 2>/dev/null || echo 0)
-        if [[ "$file_epoch" -gt 0 && "$file_epoch" -lt "$cutoff_time" ]]; then
-          echo "  Deleting: $remote_file ($(date -d "@$file_epoch" +"%Y-%m-%d %H:%M" 2>/dev/null))"
-          delete_output=$(rclone delete "$rclone_remote:$rclone_files_path/$remote_file" 2>&1)
-          if [[ $? -eq 0 ]]; then
-            ((cleanup_count++)) || true
-            # Also delete corresponding checksum file
-            rclone delete "$rclone_remote:$rclone_files_path/${remote_file}.sha256" 2>/dev/null || true
-          else
-            print_error "  Failed to delete $remote_file: $delete_output"
-            ((cleanup_errors++)) || true
-          fi
-        fi
-      fi
-    done < <(rclone lsf "$rclone_remote:$rclone_files_path" --include "*.tar.gz" --exclude "*.sha256" 2>&1)
+    local files_repo="rclone:${rclone_remote}:${rclone_files_path}"
+    echo
+    echo "Cleaning up files repository..."
+    echo "Repository: $files_repo"
+    echo "Retention: Keep snapshots within $retention_days days"
+    echo
+
+    if apply_retention_days "$files_repo" "$restic_password" "$retention_days" "" "false"; then
+      print_success "Files repository cleanup complete"
+    else
+      print_error "Files repository cleanup failed"
+      ((cleanup_errors++)) || true
+    fi
   fi
 
   echo
   if [[ $cleanup_errors -gt 0 ]]; then
-    print_warning "Cleanup completed with $cleanup_errors error(s). Removed $cleanup_count old backup(s)."
+    print_warning "Cleanup completed with $cleanup_errors error(s)"
   else
-    print_success "Cleanup complete. Removed $cleanup_count old backup(s)."
+    print_success "Cleanup complete"
   fi
   press_enter_to_continue
 }

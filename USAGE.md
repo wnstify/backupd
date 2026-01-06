@@ -1,6 +1,10 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v2.3.0** by Backupd.
+Complete usage documentation for **Backupd v3.0.0** by Backupd.
+
+> **Note:** v3.0.0 introduces restic as the backup engine, replacing GPG+tar+pigz.
+> Key changes: deduplication, simplified encryption, retention in days (not minutes).
+> See [CHANGELOG.md](CHANGELOG.md) for migration details.
 
 ## Table of Contents
 
@@ -41,25 +45,25 @@ Before running Backupd, ensure you have the following:
 ### Auto-installed by the installer
 
 The following will be **automatically installed** if missing:
-- **pigz** - parallel gzip for fast compression
+- **restic** - backup engine with built-in encryption and deduplication (v3.0+)
 - **rclone** - for remote cloud storage
+- **argon2** - modern password hashing (optional, falls back to PBKDF2)
 
 ### Usually pre-installed
 
 These packages are typically already available on most Linux systems:
 - `openssl` - credential encryption
-- `gpg` - backup encryption  
-- `tar` - archive creation
+- `tar` - archive operations
 - `curl` - notifications
 
 ### Verify prerequisites (optional)
 
 ```bash
 # Check tools (these are usually pre-installed)
-which openssl gpg tar curl
+which openssl tar curl
 
 # After installation, verify auto-installed tools
-which pigz rclone
+which restic rclone
 ```
 
 ---
@@ -78,7 +82,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v2.3.0
+              Backupd v3.0.0
                     by Backupd
 ========================================================
 
@@ -110,7 +114,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-              Backupd v2.3.0
+              Backupd v3.0.0
                     by Backupd
 ========================================================
 
@@ -172,20 +176,20 @@ Select option [1-3]:
 - Choose **1 (Database only)** if files are managed separately
 - Choose **2 (Files only)** if databases are managed separately
 
-### Step 2: Encryption Password
+### Step 2: Repository Password
 
 ```
-Step 2: Encryption Password
+Step 2: Repository Password
 ---------------------------
-Your backups will be encrypted with AES-256.
-Enter encryption password:
-Confirm encryption password:
+Your restic repository will be encrypted with AES-256.
+Enter repository password:
+Confirm repository password:
 ```
 
 **Important:**
-- Use a strong, unique password
+- Use a strong, unique password (minimum 12 characters, 2+ special characters)
 - **Store this password securely** - you'll need it to restore backups
-- This password encrypts your database backups
+- This password encrypts your restic backup repository
 - Credentials are stored with a different machine-bound encryption
 
 ### Step 3: Database Authentication
@@ -261,31 +265,26 @@ Step 6: Retention Policy
 How long should backups be kept before automatic deletion?
 
 Select retention period:
-  1) 1 minute (TESTING ONLY)
-  2) 1 hour (TESTING)
-  3) 7 days
-  4) 14 days
-  5) 30 days (default)
-  6) 60 days
-  7) 90 days
-  8) 365 days (1 year)
-  9) No automatic cleanup
+  1) 7 days
+  2) 14 days
+  3) 30 days (default)
+  4) 60 days
+  5) 90 days
+  6) 365 days (1 year)
 
-Select option [1-9]:
+Select option [1-6]:
 ```
 
 **Retention Options:**
 
 | Option | Use Case |
 |--------|----------|
-| 1 minute / 1 hour | Testing only - verify cleanup works |
 | 7 days | Short-term, high-frequency backups |
 | 14-30 days | Standard retention (recommended) |
 | 60-90 days | Extended retention for compliance |
 | 365 days | Long-term archival |
-| No cleanup | Manual management via cloud provider |
 
-**Note:** Old backups are automatically deleted after each successful backup. You can also run cleanup manually from the menu.
+**Note:** Old backups (snapshots older than the retention period) are automatically pruned after each successful backup using `restic forget`. Restic's deduplication means storage grows slowly even with long retention.
 
 ### Step 7: Script Generation
 
@@ -889,19 +888,16 @@ Select option [1-9]:
 | Monthly | `*-*-01 02:00:00` | First day of month |
 | Daily | `*-*-* 04:00:00` | Critical systems only |
 
-### Retention Options
+### Retention Options (v3.0+)
 
-| Period | Minutes | Use Case |
-|--------|---------|----------|
-| 1 minute | 1 | Testing only |
-| 1 hour | 60 | Testing only |
-| 7 days | 10080 | Short-term |
-| 14 days | 20160 | Standard |
-| 30 days | 43200 | Default |
-| 60 days | 86400 | Extended |
-| 90 days | 129600 | Long-term |
-| 365 days | 525600 | Annual |
-| Disabled | 0 | No automatic cleanup |
+| Period | RETENTION_DAYS | Use Case |
+|--------|----------------|----------|
+| 7 days | 7 | Short-term |
+| 14 days | 14 | Standard |
+| 30 days | 30 | Default |
+| 60 days | 60 | Extended |
+| 90 days | 90 | Long-term |
+| 365 days | 365 | Annual |
 
 ### View Timer Status
 
@@ -1624,23 +1620,21 @@ DO_FILES="true"
 RCLONE_REMOTE="b2"
 RCLONE_DB_PATH="myserver/db-backups"
 RCLONE_FILES_PATH="myserver/file-backups"
-RETENTION_MINUTES="43200"
+RETENTION_DAYS="30"
 RETENTION_DESC="30 days"
+RESTIC_REPO_INITIALIZED="true"
 ```
 
-### Retention Values
+### Retention Values (v3.0+)
 
-| Description | RETENTION_MINUTES |
-|-------------|-------------------|
-| 1 minute | 1 |
-| 1 hour | 60 |
-| 7 days | 10080 |
-| 14 days | 20160 |
-| 30 days | 43200 |
-| 60 days | 86400 |
-| 90 days | 129600 |
-| 365 days | 525600 |
-| Disabled | 0 |
+| Description | RETENTION_DAYS |
+|-------------|----------------|
+| 7 days | 7 |
+| 14 days | 14 |
+| 30 days | 30 |
+| 60 days | 60 |
+| 90 days | 90 |
+| 365 days | 365 |
 
 ### Secure Credentials Location
 
@@ -1792,10 +1786,10 @@ tail -100 /etc/backupd/logs/files_logfile.log
 
 ### Retention/Cleanup Issues
 
-1. **Cleanup not running**: Verify `RETENTION_MINUTES` is set in config (not 0)
-2. **Files not being deleted**: Check rclone permissions on cloud storage
-3. **Wrong files deleted**: Verify the file pattern matches (e.g., `*-db_backups-*.tar.gz.gpg`)
-4. **Cleanup errors**: Check logs for specific rclone errors
+1. **Cleanup not running**: Verify `RETENTION_DAYS` is set in config
+2. **Snapshots not being pruned**: Check restic repository access permissions
+3. **Old backups remain**: Run `restic forget --prune` manually to force cleanup
+4. **Cleanup errors**: Check logs for specific restic errors
 
 **Test cleanup manually:**
 ```bash

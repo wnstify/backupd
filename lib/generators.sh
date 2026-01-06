@@ -1,84 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Backupd - Generators Module
-# Script generation functions for backup/restore/verify scripts
+# Backupd v3.0 - Generators Module (Restic-Based)
+# Script generation functions for restic backup/restore/verify scripts
+#
+# v3.0 Changes:
+#   - Removed generate_embedded_crypto() - scripts now source lib/crypto.sh
+#   - Replaced tar+gpg backup with restic backup
+#   - Changed retention from MINUTES to DAYS (restic uses --keep-within Xd)
+#   - Removed legacy restore generators (restic restore handled in restore.sh)
 # ============================================================================
-
-# ---------- Embedded Crypto Functions Generator ----------
-
-# Generate the crypto functions to embed in scripts
-# These are version-aware and support Argon2id + PBKDF2
-generate_embedded_crypto() {
-  local secrets_dir="$1"
-  local version iterations
-
-  version="$(get_crypto_version "$secrets_dir")"
-  iterations="$(get_pbkdf2_iterations "$version")"
-
-  cat << 'EMBEDDEDCRYPTOEOF'
-# Crypto version and iterations (set at script generation time)
-EMBEDDEDCRYPTOEOF
-
-  echo "CRYPTO_VERSION=$version"
-  echo "PBKDF2_ITERATIONS=$iterations"
-
-  cat << 'EMBEDDEDCRYPTOEOF'
-
-# Argon2id parameters
-ARGON2_TIME=3
-ARGON2_MEMORY=16
-ARGON2_PARALLEL=4
-ARGON2_LENGTH=32
-
-get_machine_id() {
-  if [[ -f /etc/machine-id ]]; then
-    cat /etc/machine-id
-  elif [[ -f /var/lib/dbus/machine-id ]]; then
-    cat /var/lib/dbus/machine-id
-  else
-    echo "$(hostname)$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo 'fallback')"
-  fi
-}
-
-derive_key_sha256() {
-  local secrets_dir="$1"
-  local machine_id salt
-  machine_id="$(get_machine_id)"
-  salt="$(cat "$secrets_dir/.s")"
-  echo -n "${machine_id}${salt}" | sha256sum | cut -d' ' -f1
-}
-
-derive_key_argon2id() {
-  local secrets_dir="$1"
-  local machine_id salt
-  machine_id="$(get_machine_id)"
-  salt="$(cat "$secrets_dir/.s")"
-  echo -n "${machine_id}${salt}" | argon2 "${salt:0:16}" -id \
-    -t "$ARGON2_TIME" -m "$ARGON2_MEMORY" -p "$ARGON2_PARALLEL" -l "$ARGON2_LENGTH" -r
-}
-
-derive_key() {
-  local secrets_dir="$1"
-  if [[ "$CRYPTO_VERSION" == "3" ]]; then
-    if command -v argon2 &>/dev/null; then
-      derive_key_argon2id "$secrets_dir"
-    else
-      echo "[ERROR] Argon2 required but not installed. Run: sudo apt install argon2" >&2
-      return 1
-    fi
-  else
-    derive_key_sha256 "$secrets_dir"
-  fi
-}
-
-get_secret() {
-  local secrets_dir="$1" secret_name="$2" key
-  [[ ! -f "$secrets_dir/$secret_name" ]] && return 1
-  key="$(derive_key "$secrets_dir")" || return 1
-  openssl enc -aes-256-cbc -pbkdf2 -iter "$PBKDF2_ITERATIONS" -d -salt -pass "pass:$key" -base64 -in "$secrets_dir/$secret_name" 2>/dev/null || echo ""
-}
-EMBEDDEDCRYPTOEOF
-}
 
 # ---------- Generate All Scripts ----------
 
@@ -89,56 +19,69 @@ generate_all_scripts() {
   local RCLONE_REMOTE="$4"
   local RCLONE_DB_PATH="$5"
   local RCLONE_FILES_PATH="$6"
-  local RETENTION_MINUTES="${7:-0}"
+  local RETENTION_DAYS="${7:-30}"  # Changed from MINUTES to DAYS
   local WEB_PATH_PATTERN="${8:-/var/www/*}"
   local WEBROOT_SUBDIR="${9:-.}"
 
   local LOGS_DIR="$INSTALL_DIR/logs"
   mkdir -p "$LOGS_DIR"
 
-  # Generate database backup script
+  # Generate database backup script (restic-based)
   if [[ "$DO_DATABASE" == "true" ]]; then
-    generate_db_backup_script "$SECRETS_DIR" "$RCLONE_REMOTE" "$RCLONE_DB_PATH" "$LOGS_DIR" "$RETENTION_MINUTES"
-    generate_db_restore_script "$SECRETS_DIR" "$RCLONE_REMOTE" "$RCLONE_DB_PATH"
-    print_success "Database backup script generated"
-    print_success "Database restore script generated"
+    generate_restic_db_backup_script "$SECRETS_DIR" "$RCLONE_REMOTE" "$RCLONE_DB_PATH" "$LOGS_DIR" "$RETENTION_DAYS"
+    print_success "Database backup script generated (restic)"
   fi
 
-  # Generate files backup script
+  # Generate files backup script (restic-based)
   if [[ "$DO_FILES" == "true" ]]; then
-    generate_files_backup_script "$SECRETS_DIR" "$RCLONE_REMOTE" "$RCLONE_FILES_PATH" "$LOGS_DIR" "$RETENTION_MINUTES" "$WEB_PATH_PATTERN" "$WEBROOT_SUBDIR"
-    generate_files_restore_script "$RCLONE_REMOTE" "$RCLONE_FILES_PATH"
-    print_success "Files backup script generated"
-    print_success "Files restore script generated"
+    generate_restic_files_backup_script "$SECRETS_DIR" "$RCLONE_REMOTE" "$RCLONE_FILES_PATH" "$LOGS_DIR" "$RETENTION_DAYS" "$WEB_PATH_PATTERN" "$WEBROOT_SUBDIR"
+    print_success "Files backup script generated (restic)"
   fi
+
+  # Generate unified restore script (restic-based)
+  generate_restic_restore_script "$SECRETS_DIR" "$RCLONE_REMOTE" "$RCLONE_DB_PATH" "$RCLONE_FILES_PATH"
+  print_success "Restore script generated (restic)"
+
+  # Generate verification scripts (restic-based)
+  generate_restic_verify_script "$SECRETS_DIR" "$RCLONE_REMOTE" "$RCLONE_DB_PATH" "$RCLONE_FILES_PATH"
+  print_success "Verify scripts generated (restic)"
 }
 
-# ---------- Generate Database Backup Script ----------
+# ---------- Generate Restic Database Backup Script ----------
 
-generate_db_backup_script() {
+generate_restic_db_backup_script() {
   local SECRETS_DIR="$1"
   local RCLONE_REMOTE="$2"
   local RCLONE_PATH="$3"
   local LOGS_DIR="$4"
-  local RETENTION_MINUTES="${5:-0}"
+  local RETENTION_DAYS="${5:-30}"
 
   cat > "$SCRIPTS_DIR/db_backup.sh" << 'DBBACKUPEOF'
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
-LOGS_DIR="%%LOGS_DIR%%"
+# ============================================================================
+# Backupd v3.0 - Restic Database Backup Script
+# Uses restic for encrypted, deduplicated backups via rclone backend
+# ============================================================================
+
+INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/restic.sh"
+source "$INSTALL_DIR/lib/crypto.sh"
+
+SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
 RCLONE_PATH="%%RCLONE_PATH%%"
-SECRETS_DIR="%%SECRETS_DIR%%"
+LOGS_DIR="%%LOGS_DIR%%"
+RETENTION_DAYS="%%RETENTION_DAYS%%"
 HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
-RETENTION_MINUTES="%%RETENTION_MINUTES%%"
+LOG_PREFIX="[DB-BACKUP]"
 
 # Lock file in fixed location
 LOCK_FILE="/var/lock/backupd-db.lock"
 
+# Secret file names
 SECRET_PASSPHRASE=".c1"
 SECRET_DB_USER=".c2"
 SECRET_DB_PASS=".c3"
@@ -165,6 +108,7 @@ write_progress() {
   "job_id": "$JOB_ID",
   "type": "backup",
   "subtype": "database",
+  "engine": "restic",
   "status": "$status",
   "phase": "$phase",
   "percent": $percent,
@@ -179,27 +123,20 @@ PROGRESSEOF
 write_progress "initializing" 0 "Starting database backup"
 
 # Cleanup function
-TEMP_DIR=""
 MYSQL_AUTH_FILE=""
 cleanup() {
   local exit_code=$?
-  [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"
   [[ -n "$MYSQL_AUTH_FILE" && -f "$MYSQL_AUTH_FILE" ]] && rm -f "$MYSQL_AUTH_FILE"
   exit $exit_code
 }
 trap cleanup EXIT INT TERM
 
-%%CRYPTO_FUNCTIONS%%
-
 # Acquire lock (fixed location so it works across runs)
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "[INFO] Another database backup is running. Exiting."
+  echo "$LOG_PREFIX Another database backup is running. Exiting."
   exit 0
 fi
-
-# Create temp directory
-TEMP_DIR="$(mktemp -d)"
 
 # Log rotation function
 rotate_log() {
@@ -218,26 +155,19 @@ rotate_log() {
 }
 
 # Logging with rotation
-STAMP="$(date +%F-%H%M)"
 LOG="$LOGS_DIR/db_logfile.log"
 mkdir -p "$LOGS_DIR"
 rotate_log "$LOG"
 touch "$LOG" && chmod 600 "$LOG"
 exec > >(tee -a "$LOG") 2>&1
-echo "==== $(date +%F' '%T) START per-db backup ===="
+echo "==== $(date +%F' '%T) START restic db backup ===="
 write_progress "starting" 5 "Checking prerequisites"
 
-# Check disk space (need at least 1GB free in temp)
-AVAIL_MB=$(df -m /tmp 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
-if [[ "$AVAIL_MB" -lt 1000 ]]; then
-  echo "[ERROR] Insufficient disk space in /tmp (${AVAIL_MB}MB available, 1000MB required)"
-  exit 3
-fi
+# Get restic repository password from secrets
+RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
+[[ -z "$RESTIC_PASSWORD" ]] && { echo "$LOG_PREFIX [ERROR] No repository password found"; exit 2; }
 
-# Get secrets
-PASSPHRASE="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
-[[ -z "$PASSPHRASE" ]] && { echo "[ERROR] No passphrase found"; exit 2; }
-
+# Get notification credentials
 NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
@@ -356,22 +286,33 @@ send_notification() {
   fi
 }
 
-send_notification "DB Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started" "{}" "-1" "none"
+send_notification "DB Backup Started on $HOSTNAME" "Starting restic backup at $(date)" "backup_started" "{}" "-1" "none"
 
-# Compressor
-if command -v pigz >/dev/null 2>&1; then
-  COMPRESSOR="pigz -9 -p $(nproc 2>/dev/null || echo 2)"
-else
-  COMPRESSOR="gzip -9"
+# Build restic repository URL
+REPO="$(get_restic_repo "$RCLONE_REMOTE" "$RCLONE_PATH")"
+echo "$LOG_PREFIX Repository: $REPO"
+
+# Initialize repo if needed
+write_progress "initializing" 10 "Checking repository"
+if ! repo_exists "$REPO" "$RESTIC_PASSWORD"; then
+  echo "$LOG_PREFIX Initializing restic repository..."
+  if ! init_restic_repo "$REPO" "$RESTIC_PASSWORD"; then
+    echo "$LOG_PREFIX [ERROR] Failed to initialize repository"
+    send_notification "DB Backup Failed on $HOSTNAME" "Repository initialization failed" "backup_failed" "{}" "1" "siren"
+    exit 3
+  fi
+  echo "$LOG_PREFIX Repository initialized"
 fi
 
-# DB client
+# Detect DB client
 if command -v mariadb >/dev/null 2>&1; then
   DB_CLIENT="mariadb"; DB_DUMP="mariadb-dump"
 elif command -v mysql >/dev/null 2>&1; then
   DB_CLIENT="mysql"; DB_DUMP="mysqldump"
 else
-  echo "[ERROR] No database client found"; exit 5
+  echo "$LOG_PREFIX [ERROR] No database client found"
+  send_notification "DB Backup Failed on $HOSTNAME" "No database client found" "backup_failed" "{}" "1" "siren"
+  exit 5
 fi
 
 # Get DB credentials and create auth file (more secure than command line)
@@ -391,472 +332,95 @@ AUTHEOF
   MYSQL_ARGS=("--defaults-extra-file=$MYSQL_AUTH_FILE")
 fi
 
+# Get databases to backup
 EXCLUDE_REGEX='^(information_schema|performance_schema|sys|mysql)$'
 DBS="$($DB_CLIENT "${MYSQL_ARGS[@]}" -NBe 'SHOW DATABASES' 2>/dev/null | grep -Ev "$EXCLUDE_REGEX" || true)"
 
 if [[ -z "$DBS" ]]; then
-  echo "[ERROR] No databases found or cannot connect to database"
+  echo "$LOG_PREFIX [ERROR] No databases found or cannot connect to database"
   send_notification "DB Backup Failed on $HOSTNAME" "No databases found" "backup_failed" "{}" "1" "siren"
   exit 6
 fi
 
-DEST="$TEMP_DIR/$STAMP"
-mkdir -p "$DEST"
-
+# Backup each database using restic
 declare -a failures=()
 db_count=0
 total_dbs=$(echo "$DBS" | wc -w)
-write_progress "dumping" 10 "Dumping $total_dbs databases"
+write_progress "backing_up" 15 "Backing up $total_dbs databases"
+
 for db in $DBS; do
-  echo "  -> Dumping: $db"
-  write_progress "dumping" $((10 + (db_count * 40 / total_dbs))) "Dumping: $db"
-  if "$DB_DUMP" "${MYSQL_ARGS[@]}" --databases "$db" --single-transaction --quick \
-      --routines --events --triggers --hex-blob --default-character-set=utf8mb4 \
-      2>/dev/null | $COMPRESSOR > "$DEST/${db}-${STAMP}.sql.gz"; then
-    echo "    OK: $db"
+  echo "$LOG_PREFIX Backing up database: $db"
+  progress_pct=$((15 + (db_count * 60 / total_dbs)))
+  write_progress "backing_up" $progress_pct "Backing up: $db"
+
+  # Backup database via stdin to restic
+  if $DB_DUMP "${MYSQL_ARGS[@]}" --databases "$db" --single-transaction --quick \
+      --routines --events --triggers --hex-blob --default-character-set=utf8mb4 2>/dev/null | \
+    RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" backup \
+      --stdin \
+      --stdin-filename "${db}.sql" \
+      --tag "database" \
+      --tag "db:${db}" \
+      --host "$HOSTNAME" 2>&1; then
+    echo "$LOG_PREFIX   OK: $db"
     ((db_count++)) || true
   else
-    echo "    FAILED: $db"
+    echo "$LOG_PREFIX   FAILED: $db"
     failures+=("$db")
   fi
 done
 
 if [[ $db_count -eq 0 ]]; then
-  echo "[ERROR] All database dumps failed"
-  send_notification "DB Backup Failed on $HOSTNAME" "All dumps failed" "backup_failed" "{}" "1" "siren"
+  echo "$LOG_PREFIX [ERROR] All database backups failed"
+  send_notification "DB Backup Failed on $HOSTNAME" "All backups failed" "backup_failed" "{}" "1" "siren"
   exit 7
 fi
 
-# Archive + encrypt
-ARCHIVE="$TEMP_DIR/${HOSTNAME}-db_backups-${STAMP}.tar.gz.gpg"
-echo "Creating encrypted archive..."
-write_progress "archiving" 50 "Creating encrypted archive"
-tar -C "$TEMP_DIR" -cf - "$STAMP" | $COMPRESSOR | \
-  gpg --batch --yes --pinentry-mode=loopback --passphrase "$PASSPHRASE" --symmetric --cipher-algo AES256 -o "$ARCHIVE"
-
-# Verify archive
-echo "Verifying archive..."
-if ! gpg --batch --quiet --pinentry-mode=loopback --passphrase "$PASSPHRASE" -d "$ARCHIVE" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
-  echo "[ERROR] Archive verification failed"
-  send_notification "DB Backup Failed on $HOSTNAME" "Archive verification failed" "backup_failed" "{}" "1" "siren"
-  exit 4
-fi
-echo "Archive verified."
-
-# Generate checksum
-echo "Generating checksum..."
-CHECKSUM_FILE="${ARCHIVE}.sha256"
-sha256sum "$ARCHIVE" | awk '{print $1}' > "$CHECKSUM_FILE"
-echo "Checksum: $(cat "$CHECKSUM_FILE")"
-
-# Upload with timeout and retry
-echo "Uploading to remote storage..."
-write_progress "uploading" 60 "Uploading to remote storage"
-RCLONE_TIMEOUT=1800  # 30 minutes
-if ! timeout $RCLONE_TIMEOUT rclone copy "$ARCHIVE" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 --low-level-retries 10; then
-  echo "[ERROR] Upload failed"
-  send_notification "DB Backup Failed on $HOSTNAME" "Upload failed" "backup_failed" "{}" "1" "siren"
-  exit 8
+# Apply retention policy
+write_progress "retention" 80 "Applying retention policy"
+echo "$LOG_PREFIX Applying retention policy (keeping backups within $RETENTION_DAYS days)..."
+if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
+    --tag "database" \
+    --keep-within "${RETENTION_DAYS}d" \
+    --prune 2>&1; then
+  echo "$LOG_PREFIX Retention policy applied"
+else
+  echo "$LOG_PREFIX [WARNING] Retention policy failed (backup succeeded)"
 fi
 
-# Upload checksum file
-if ! timeout 60 rclone copy "$CHECKSUM_FILE" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3; then
-  echo "[WARNING] Checksum upload failed, but backup succeeded"
-fi
-
-# Verify upload
-if ! timeout 60 rclone check "$(dirname "$ARCHIVE")" "$RCLONE_REMOTE:$RCLONE_PATH" --one-way --size-only --include "$(basename "$ARCHIVE")" 2>/dev/null; then
-  echo "[WARNING] Upload verification could not complete, but upload may have succeeded"
-fi
-
-echo "Uploaded to $RCLONE_REMOTE:$RCLONE_PATH"
-write_progress "uploading" 80 "Upload complete"
-
-# Retention cleanup
-if [[ "$RETENTION_MINUTES" -gt 0 ]]; then
-  echo "Running retention cleanup (keeping backups newer than $RETENTION_MINUTES minutes)..."
-  write_progress "cleanup" 85 "Running retention cleanup"
-  cleanup_count=0
-  cleanup_errors=0
-  cutoff_time=$(date -d "-$RETENTION_MINUTES minutes" +%s 2>/dev/null || date -v-${RETENTION_MINUTES}M +%s 2>/dev/null || echo 0)
-
-  if [[ "$cutoff_time" -gt 0 ]]; then
-    # List remote files and check their age
-    while IFS= read -r remote_file; do
-      [[ -z "$remote_file" ]] && continue
-      # Get file modification time from rclone
-      file_time=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_PATH/$remote_file" 2>&1 | awk '{print $2" "$3}' | head -1)
-      if [[ -n "$file_time" && ! "$file_time" =~ ^ERROR ]]; then
-        file_epoch=$(date -d "$file_time" +%s 2>/dev/null || echo 0)
-        if [[ "$file_epoch" -gt 0 && "$file_epoch" -lt "$cutoff_time" ]]; then
-          echo "  Deleting old backup: $remote_file"
-          delete_output=$(rclone delete "$RCLONE_REMOTE:$RCLONE_PATH/$remote_file" 2>&1)
-          if [[ $? -eq 0 ]]; then
-            ((cleanup_count++)) || true
-            # Also delete corresponding checksum file
-            rclone delete "$RCLONE_REMOTE:$RCLONE_PATH/${remote_file}.sha256" 2>/dev/null || true
-          else
-            echo "  [ERROR] Failed to delete $remote_file: $delete_output"
-            ((cleanup_errors++)) || true
-          fi
-        fi
-      fi
-    done < <(rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH" --include "*-db_backups-*.tar.gz.gpg" 2>&1)
-
-    if [[ $cleanup_errors -gt 0 ]]; then
-      echo "[WARNING] Retention cleanup completed with $cleanup_errors error(s). Removed $cleanup_count old backup(s)."
-      send_notification "DB Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning" "{}" "0" "bike"
-    elif [[ $cleanup_count -gt 0 ]]; then
-      echo "Retention cleanup complete. Removed $cleanup_count old backup(s)."
-      send_notification "DB Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup" "{}" "-1" "none"
-    else
-      echo "Retention cleanup complete. No old backups to remove."
-    fi
-  else
-    echo "  [WARNING] Could not calculate cutoff time, skipping cleanup"
-    send_notification "DB Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed" "{}" "1" "falling"
-  fi
-fi
-
+# Summary
+write_progress "complete" 100 "Backup completed" "completed"
 if ((${#failures[@]})); then
   send_notification "DB Backup Completed with Errors on $HOSTNAME" "Backed up: $db_count, Failed: ${failures[*]}" "backup_warning" "{}" "0" "bike"
   write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
-  send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up" "backup_complete" "{}" "0" "magic"
-  write_progress "complete" 100 "Backup completed successfully" "completed"
+  send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up via restic" "backup_complete" "{}" "0" "magic"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
 DBBACKUPEOF
 
-  # Generate crypto functions and inject them
-  local crypto_functions
-  crypto_functions="$(generate_embedded_crypto "$SECRETS_DIR")"
-
-  # Create temp file with crypto functions for sed
-  local crypto_temp
-  crypto_temp="$(mktemp)"
-  echo "$crypto_functions" > "$crypto_temp"
-
   # Replace placeholders
   sed -i \
-    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
     -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
     -e "s|%%RCLONE_PATH%%|$RCLONE_PATH|g" \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    -e "s|%%RETENTION_MINUTES%%|$RETENTION_MINUTES|g" \
+    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%RETENTION_DAYS%%|$RETENTION_DAYS|g" \
     "$SCRIPTS_DIR/db_backup.sh"
 
-  # Replace crypto functions placeholder (multi-line)
-  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/db_backup.sh"
-
-  rm -f "$crypto_temp"
   chmod +x "$SCRIPTS_DIR/db_backup.sh"
 }
 
-# ---------- Generate Database Restore Script ----------
+# ---------- Generate Restic Files Backup Script ----------
 
-generate_db_restore_script() {
-  local SECRETS_DIR="$1"
-  local RCLONE_REMOTE="$2"
-  local RCLONE_PATH="$3"
-
-  cat > "$SCRIPTS_DIR/db_restore.sh" << 'DBRESTOREEOF'
-#!/usr/bin/env bash
-set -euo pipefail
-umask 077
-
-RCLONE_REMOTE="%%RCLONE_REMOTE%%"
-RCLONE_PATH="%%RCLONE_PATH%%"
-SECRETS_DIR="%%SECRETS_DIR%%"
-LOG_PREFIX="[DB-RESTORE]"
-
-# Use same lock as backup to prevent conflicts
-LOCK_FILE="/var/lock/backupd-db.lock"
-
-SECRET_DB_USER=".c2"
-SECRET_DB_PASS=".c3"
-
-%%CRYPTO_FUNCTIONS%%
-
-# Acquire lock (wait up to 60 seconds if backup is running)
-exec 9>"$LOCK_FILE"
-if ! flock -w 60 9; then
-  echo "$LOG_PREFIX ERROR: Could not acquire lock. A backup may be running."
-  echo "$LOG_PREFIX Please wait for the backup to complete and try again."
-  exit 1
-fi
-
-echo "========================================================"
-echo "           Database Restore Utility"
-echo "========================================================"
-echo
-
-# DB client
-if command -v mariadb >/dev/null 2>&1; then DB_CLIENT="mariadb"
-elif command -v mysql >/dev/null 2>&1; then DB_CLIENT="mysql"
-else echo "$LOG_PREFIX ERROR: No database client found."; exit 1; fi
-
-# Get DB credentials and create auth file (more secure than command line)
-DB_USER="$(get_secret "$SECRETS_DIR" "$SECRET_DB_USER" || echo "")"
-DB_PASS="$(get_secret "$SECRETS_DIR" "$SECRET_DB_PASS" || echo "")"
-MYSQL_ARGS=()
-MYSQL_AUTH_FILE=""
-
-if [[ -n "$DB_USER" && -n "$DB_PASS" ]]; then
-  MYSQL_AUTH_FILE="$(mktemp)"
-  chmod 600 "$MYSQL_AUTH_FILE"
-  cat > "$MYSQL_AUTH_FILE" << AUTHEOF
-[client]
-user=$DB_USER
-password=$DB_PASS
-AUTHEOF
-  MYSQL_ARGS=("--defaults-extra-file=$MYSQL_AUTH_FILE")
-fi
-
-# Cleanup function
-cleanup_restore() {
-  [[ -n "$MYSQL_AUTH_FILE" && -f "$MYSQL_AUTH_FILE" ]] && rm -f "$MYSQL_AUTH_FILE"
-}
-
-TEMP_DIR="$(mktemp -d)"
-trap "rm -rf '$TEMP_DIR'; cleanup_restore" EXIT
-
-echo "Step 1: Encryption Password"
-echo "----------------------------"
-read -sp "Enter backup encryption password: " RESTORE_PASSWORD
-echo
-echo
-
-echo "Step 2: Select Backup"
-echo "---------------------"
-echo "$LOG_PREFIX Fetching backups from $RCLONE_REMOTE:$RCLONE_PATH..."
-
-declare -a ALL_BACKUPS=()
-remote_files="$(rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH" --include "*.tar.gz.gpg" 2>/dev/null | sort -r)" || true
-while IFS= read -r f; do [[ -n "$f" ]] && ALL_BACKUPS+=("$f"); done <<< "$remote_files"
-
-echo "$LOG_PREFIX Found ${#ALL_BACKUPS[@]} backup(s)."
-[[ ${#ALL_BACKUPS[@]} -eq 0 ]] && { echo "$LOG_PREFIX No backups found."; exit 1; }
-
-# Non-interactive mode: if BACKUP_ID is set, skip selection
-if [[ -n "\${BACKUP_ID:-}" ]]; then
-  SELECTED=""
-  for backup in "\${ALL_BACKUPS[@]}"; do
-    if [[ "\$backup" == "\$BACKUP_ID" ]]; then
-      SELECTED="\$backup"
-      break
-    fi
-  done
-  if [[ -z "\$SELECTED" ]]; then
-    echo "\$LOG_PREFIX ERROR: Specified backup not found: \$BACKUP_ID"
-    echo "\$LOG_PREFIX Available backups:"
-    printf '  %s\\n' "\${ALL_BACKUPS[@]}"
-    exit 1
-  fi
-  echo "\$LOG_PREFIX Using specified backup: \$SELECTED"
-else
-  # Interactive mode - show selection menu
-  echo
-  for i in "\${!ALL_BACKUPS[@]}"; do
-    printf "  %2d) %s\\n" "\$((i+1))" "\${ALL_BACKUPS[\$i]}"
-  done
-  echo
-  read -p "Select backup [1-\${#ALL_BACKUPS[@]}]: " sel
-  [[ ! "\$sel" =~ ^[0-9]+\$ ]] && exit 1
-  SELECTED="\${ALL_BACKUPS[\$((sel-1))]}"
-fi
-
-echo
-echo "$LOG_PREFIX Downloading $SELECTED..."
-rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$SELECTED" "$TEMP_DIR/" --progress
-
-# Download and verify checksum if available
-CHECKSUM_FILE="${SELECTED}.sha256"
-if rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$CHECKSUM_FILE" "$TEMP_DIR/" 2>/dev/null; then
-  echo "$LOG_PREFIX Verifying checksum..."
-  STORED_CHECKSUM=$(cat "$TEMP_DIR/$CHECKSUM_FILE")
-  CALCULATED_CHECKSUM=$(sha256sum "$TEMP_DIR/$SELECTED" | awk '{print $1}')
-  if [[ "$STORED_CHECKSUM" == "$CALCULATED_CHECKSUM" ]]; then
-    echo "$LOG_PREFIX Checksum verified"
-  else
-    echo "$LOG_PREFIX [ERROR] Checksum mismatch! Backup may be corrupted."
-    echo "$LOG_PREFIX   Expected: $STORED_CHECKSUM"
-    echo "$LOG_PREFIX   Got:      $CALCULATED_CHECKSUM"
-    read -p "Continue anyway? (y/N): " continue_anyway
-    [[ ! "$continue_anyway" =~ ^[Yy]$ ]] && exit 1
-  fi
-else
-  echo "$LOG_PREFIX [INFO] No checksum file found (backup may predate checksum feature)"
-fi
-
-echo "$LOG_PREFIX Decrypting..."
-EXTRACT_DIR="$TEMP_DIR/extracted"
-mkdir -p "$EXTRACT_DIR"
-gpg --batch --quiet --pinentry-mode=loopback --passphrase "$RESTORE_PASSWORD" -d "$TEMP_DIR/$SELECTED" | tar -xzf - -C "$EXTRACT_DIR"
-
-EXTRACTED_DIR="$(find "$EXTRACT_DIR" -maxdepth 1 -type d ! -path "$EXTRACT_DIR" | head -1)"
-[[ -z "$EXTRACTED_DIR" ]] && EXTRACTED_DIR="$EXTRACT_DIR"
-
-echo
-echo "Step 3: Select Databases"
-echo "------------------------"
-mapfile -t SQL_FILES < <(find "$EXTRACTED_DIR" -name "*.sql.gz" -type f | sort)
-[[ ${#SQL_FILES[@]} -eq 0 ]] && { echo "No databases found in backup."; exit 1; }
-
-for i in "${!SQL_FILES[@]}"; do
-  db_name="$(basename "${SQL_FILES[$i]}" | sed -E 's/-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}\.sql\.gz$//')"
-  printf "  %2d) %s\n" "$((i+1))" "$db_name"
-done
-echo "  A) All databases"
-echo "  Q) Quit"
-echo
-read -p "Selection: " db_sel
-
-[[ "$db_sel" =~ ^[Qq]$ ]] && exit 0
-
-declare -a SELECTED_DBS=()
-if [[ "$db_sel" =~ ^[Aa]$ ]]; then
-  SELECTED_DBS=("${SQL_FILES[@]}")
-else
-  IFS=',' read -ra sels <<< "$db_sel"
-  for s in "${sels[@]}"; do
-    s="$(echo "$s" | tr -d ' ')"
-    [[ "$s" =~ ^[0-9]+$ ]] && SELECTED_DBS+=("${SQL_FILES[$((s-1))]}")
-  done
-fi
-
-echo
-echo "Restoring ${#SELECTED_DBS[@]} database(s)..."
-read -p "Confirm? (yes/no): " confirm
-[[ ! "$confirm" =~ ^[Yy][Ee][Ss]$ ]] && exit 0
-
-declare -a RESTORED_FILES=()
-declare -a RESTORED_NAMES=()
-
-for sql_file in "${SELECTED_DBS[@]}"; do
-  db_name="$(basename "$sql_file" | sed -E 's/-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}\.sql\.gz$//')"
-  echo "Restoring: $db_name"
-  if gunzip -c "$sql_file" | $DB_CLIENT "${MYSQL_ARGS[@]}" 2>/dev/null; then
-    echo "  Success"
-    RESTORED_FILES+=("$sql_file")
-    RESTORED_NAMES+=("$db_name")
-  else
-    echo "  Failed"
-  fi
-done
-
-echo
-echo "========================================================"
-echo "           IMPORTANT: Verify Your Site"
-echo "========================================================"
-echo
-echo "Database restore completed. Before we clean up the backup"
-echo "files, please verify that your website is working correctly."
-echo
-echo "Check your website now, then return here."
-echo
-echo "------------------------------------------------------------------------"
-echo "If your site is working correctly:"
-echo "  Type exactly: Yes, I checked the website"
-echo
-echo "If your site is NOT working (quick option):"
-echo "  Type: N"
-echo "  (We will save the SQL files to /root/ for manual recovery)"
-echo "------------------------------------------------------------------------"
-echo
-read -p "Your response: " VERIFY_RESPONSE
-
-if [[ "$VERIFY_RESPONSE" == "Yes, I checked the website" ]]; then
-  echo
-  echo "$LOG_PREFIX Site verified. Cleaning up backup files..."
-  echo "$LOG_PREFIX Restore complete!"
-elif [[ "$VERIFY_RESPONSE" =~ ^[Nn]$ ]]; then
-  echo
-  echo "$LOG_PREFIX Site not working. Saving SQL files for manual recovery..."
-
-  # Create recovery directory
-  RECOVERY_DIR="/root/db-restore-recovery-$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "$RECOVERY_DIR"
-  chmod 700 "$RECOVERY_DIR"
-
-  # Copy all restored SQL files
-  for sql_file in "${RESTORED_FILES[@]}"; do
-    cp "$sql_file" "$RECOVERY_DIR/"
-    echo "$LOG_PREFIX   Saved: $(basename "$sql_file")"
-  done
-
-  echo
-  echo "========================================================"
-  echo "           SQL Files Saved"
-  echo "========================================================"
-  echo
-  echo "Your SQL backup files have been saved to:"
-  echo "  $RECOVERY_DIR"
-  echo
-  echo "To manually restore a database:"
-  echo "  gunzip -c $RECOVERY_DIR/DBNAME-*.sql.gz | mysql DBNAME"
-  echo
-  echo "Or to view the SQL without restoring:"
-  echo "  gunzip -c $RECOVERY_DIR/DBNAME-*.sql.gz | less"
-  echo
-  echo "Remember to delete these files after you're done:"
-  echo "  rm -rf $RECOVERY_DIR"
-  echo
-else
-  echo
-  echo "$LOG_PREFIX Invalid response. Saving SQL files as a precaution..."
-
-  # Create recovery directory
-  RECOVERY_DIR="/root/db-restore-recovery-$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "$RECOVERY_DIR"
-  chmod 700 "$RECOVERY_DIR"
-
-  # Copy all restored SQL files
-  for sql_file in "${RESTORED_FILES[@]}"; do
-    cp "$sql_file" "$RECOVERY_DIR/"
-    echo "$LOG_PREFIX   Saved: $(basename "$sql_file")"
-  done
-
-  echo
-  echo "SQL files saved to: $RECOVERY_DIR"
-  echo "Delete after verification: rm -rf $RECOVERY_DIR"
-fi
-
-echo
-echo "Done."
-DBRESTOREEOF
-
-  # Generate crypto functions and inject them
-  local crypto_functions
-  crypto_functions="$(generate_embedded_crypto "$SECRETS_DIR")"
-
-  local crypto_temp
-  crypto_temp="$(mktemp)"
-  echo "$crypto_functions" > "$crypto_temp"
-
-  sed -i \
-    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
-    -e "s|%%RCLONE_PATH%%|$RCLONE_PATH|g" \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    "$SCRIPTS_DIR/db_restore.sh"
-
-  # Replace crypto functions placeholder (multi-line)
-  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/db_restore.sh"
-
-  rm -f "$crypto_temp"
-  chmod +x "$SCRIPTS_DIR/db_restore.sh"
-}
-
-# ---------- Generate Files Backup Script ----------
-
-generate_files_backup_script() {
+generate_restic_files_backup_script() {
   local SECRETS_DIR="$1"
   local RCLONE_REMOTE="$2"
   local RCLONE_PATH="$3"
   local LOGS_DIR="$4"
-  local RETENTION_MINUTES="${5:-0}"
+  local RETENTION_DAYS="${5:-30}"
   local WEB_PATH_PATTERN="${6:-/var/www/*}"
   local WEBROOT_SUBDIR="${7:-.}"
 
@@ -865,20 +429,30 @@ generate_files_backup_script() {
 set -euo pipefail
 umask 077
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOGS_DIR="%%LOGS_DIR%%"
+# ============================================================================
+# Backupd v3.0 - Restic Files Backup Script
+# Uses restic for encrypted, deduplicated backups via rclone backend
+# ============================================================================
+
+INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/restic.sh"
+source "$INSTALL_DIR/lib/crypto.sh"
+
+SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
 RCLONE_PATH="%%RCLONE_PATH%%"
-SECRETS_DIR="%%SECRETS_DIR%%"
-HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
-LOG_PREFIX="[FILES-BACKUP]"
+LOGS_DIR="%%LOGS_DIR%%"
+RETENTION_DAYS="%%RETENTION_DAYS%%"
 WEB_PATH_PATTERN="%%WEB_PATH_PATTERN%%"
 WEBROOT_SUBDIR="%%WEBROOT_SUBDIR%%"
-RETENTION_MINUTES="%%RETENTION_MINUTES%%"
+HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
+LOG_PREFIX="[FILES-BACKUP]"
 
 # Lock file in fixed location
 LOCK_FILE="/var/lock/backupd-files.lock"
 
+# Secret file names
+SECRET_PASSPHRASE=".c1"
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
@@ -902,6 +476,7 @@ write_progress() {
   "job_id": "$JOB_ID",
   "type": "backup",
   "subtype": "files",
+  "engine": "restic",
   "status": "$status",
   "phase": "$phase",
   "percent": $percent,
@@ -916,25 +491,18 @@ PROGRESSEOF
 write_progress "initializing" 0 "Starting files backup"
 
 # Cleanup function
-TEMP_DIR=""
 cleanup() {
   local exit_code=$?
-  [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"
   exit $exit_code
 }
 trap cleanup EXIT INT TERM
 
-%%CRYPTO_FUNCTIONS%%
-
 # Acquire lock (fixed location)
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "$LOG_PREFIX Another backup running. Exiting."
+  echo "$LOG_PREFIX Another files backup is running. Exiting."
   exit 0
 fi
-
-# Create temp directory
-TEMP_DIR="$(mktemp -d)"
 
 # Log rotation function
 rotate_log() {
@@ -952,22 +520,20 @@ rotate_log() {
   fi
 }
 
-STAMP="$(date +%F-%H%M)"
+# Logging with rotation
 LOG="$LOGS_DIR/files_logfile.log"
 mkdir -p "$LOGS_DIR"
 rotate_log "$LOG"
 touch "$LOG" && chmod 600 "$LOG"
 exec > >(tee -a "$LOG") 2>&1
-echo "==== $(date +%F' '%T) START files backup ===="
+echo "==== $(date +%F' '%T) START restic files backup ===="
 write_progress "starting" 5 "Checking prerequisites"
 
-# Check disk space (need at least 2GB free in temp)
-AVAIL_MB=$(df -m /tmp 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
-if [[ "$AVAIL_MB" -lt 2000 ]]; then
-  echo "$LOG_PREFIX [ERROR] Insufficient disk space in /tmp (${AVAIL_MB}MB available, 2000MB required)"
-  exit 3
-fi
+# Get restic repository password from secrets
+RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
+[[ -z "$RESTIC_PASSWORD" ]] && { echo "$LOG_PREFIX [ERROR] No repository password found"; exit 2; }
 
+# Get notification credentials
 NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
 NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
 WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
@@ -1086,12 +652,26 @@ send_notification() {
   fi
 }
 
-send_notification "Files Backup Started on $HOSTNAME" "Starting at $(date)" "backup_started" "{}" "-1" "none"
+send_notification "Files Backup Started on $HOSTNAME" "Starting restic backup at $(date)" "backup_started" "{}" "-1" "none"
 
-command -v pigz >/dev/null 2>&1 || { echo "$LOG_PREFIX pigz not found"; exit 1; }
-command -v tar >/dev/null 2>&1 || { echo "$LOG_PREFIX tar not found"; exit 1; }
+# Build restic repository URL
+REPO="$(get_restic_repo "$RCLONE_REMOTE" "$RCLONE_PATH")"
+echo "$LOG_PREFIX Repository: $REPO"
 
-sanitize_for_filename() {
+# Initialize repo if needed
+write_progress "initializing" 10 "Checking repository"
+if ! repo_exists "$REPO" "$RESTIC_PASSWORD"; then
+  echo "$LOG_PREFIX Initializing restic repository..."
+  if ! init_restic_repo "$REPO" "$RESTIC_PASSWORD"; then
+    echo "$LOG_PREFIX [ERROR] Failed to initialize repository"
+    send_notification "Files Backup Failed on $HOSTNAME" "Repository initialization failed" "backup_failed" "{}" "1" "siren"
+    exit 3
+  fi
+  echo "$LOG_PREFIX Repository initialized"
+fi
+
+# Site name detection functions
+sanitize_for_tag() {
   local s="$1"
   s="$(echo -n "$s" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
   s="${s//:\/\//__}"; s="${s//\//__}"
@@ -1102,7 +682,6 @@ sanitize_for_filename() {
 }
 
 # Get site name/URL from various app types
-# Priority: WordPress > Laravel > Node.js > nginx config > folder name
 get_site_name() {
   local site_path="$1"
   local owner="${2:-www-data}"
@@ -1145,7 +724,7 @@ get_site_name() {
 echo "$LOG_PREFIX Scanning using pattern: $WEB_PATH_PATTERN"
 echo "$LOG_PREFIX Webroot subdirectory: $WEBROOT_SUBDIR"
 
-# Check if we can find any sites matching the pattern
+# Find site directories
 site_dirs=()
 for dir in $WEB_PATH_PATTERN; do
   [[ -d "$dir" ]] && site_dirs+=("$dir")
@@ -1161,7 +740,7 @@ declare -a failures=()
 success_count=0
 site_count=0
 total_sites=${#site_dirs[@]}
-write_progress "scanning" 10 "Found $total_sites site directories"
+write_progress "scanning" 15 "Found $total_sites site directories"
 
 for site_path in "${site_dirs[@]}"; do
   [[ ! -d "$site_path" ]] && continue
@@ -1170,20 +749,17 @@ for site_path in "${site_dirs[@]}"; do
   # Skip common non-site directories
   [[ "$site_name" == "default" || "$site_name" == "html" || "$site_name" == "cgi-bin" ]] && continue
 
-  # Determine the actual web root (where files are)
-  # WEBROOT_SUBDIR can be "." (direct), "public_html", "httpdocs", etc.
+  # Determine the actual web root
   if [[ "$WEBROOT_SUBDIR" == "." ]]; then
     webroot="$site_path"
   else
     webroot="$site_path/$WEBROOT_SUBDIR"
-    # If webroot subdir doesn't exist, check if files are directly in site_path
     if [[ ! -d "$webroot" ]]; then
-      # Fall back to direct path if subdir doesn't exist
       webroot="$site_path"
     fi
   fi
 
-  # Skip if webroot is empty or doesn't contain any files
+  # Skip if webroot is empty
   if [[ ! -d "$webroot" ]] || [[ -z "$(ls -A "$webroot" 2>/dev/null)" ]]; then
     echo "$LOG_PREFIX [$site_name] Skipping: empty or missing webroot"
     continue
@@ -1193,676 +769,542 @@ for site_path in "${site_dirs[@]}"; do
 
   owner="$(stat -c '%U' "$site_path" 2>/dev/null || echo "www-data")"
   site_url="$(get_site_name "$webroot" "$owner")"
-  base_name="$(sanitize_for_filename "$site_url")"
-  archive_path="$TEMP_DIR/${base_name}-${STAMP}.tar.gz"
+  site_tag="$(sanitize_for_tag "$site_url")"
 
-  echo "$LOG_PREFIX [$site_name] Archiving ($site_url)..."
-  write_progress "archiving" $((10 + (site_count * 80 / total_sites))) "Archiving: $site_name"
+  echo "$LOG_PREFIX [$site_name] Backing up ($site_url)..."
+  progress_pct=$((15 + (site_count * 60 / total_sites)))
+  write_progress "backing_up" $progress_pct "Backing up: $site_name"
 
-  # Archive CONTENTS of webroot (not the directory itself)
-  # This allows restore to extract INTO existing webroot without replacing it
-  # Critical for panels like Enhance that use overlay containers
-  #
-  # We also create a metadata file that stores the restore path
-  metadata_file="$TEMP_DIR/${base_name}.restore-path"
-
-  # Store restore path in metadata
-  echo "$webroot" > "$metadata_file"
-
-  # Archive contents of webroot
-  if tar --warning=no-file-changed --ignore-failed-read -I pigz -cpf "$archive_path" -C "$webroot" . 2>/dev/null; then
-    tar_status=0
-  else
-    tar_status=$?
-  fi
-
-  # tar exit code 1 = files changed during archive (acceptable)
-  # tar exit code > 1 = actual error
-  [[ $tar_status -gt 1 ]] && { echo "$LOG_PREFIX [$site_name] Archive failed"; failures+=("$site_name"); continue; }
-  [[ ! -f "$archive_path" ]] && { echo "$LOG_PREFIX [$site_name] Archive file not created"; failures+=("$site_name"); continue; }
-
-  echo "$LOG_PREFIX [$site_name] Uploading..."
-
-  # Generate checksum
-  checksum_file="${archive_path}.sha256"
-  sha256sum "$archive_path" | awk '{print $1}' > "$checksum_file"
-  echo "$LOG_PREFIX [$site_name] Checksum: $(cat "$checksum_file")"
-
-  if timeout 3600 rclone copy "$archive_path" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 --low-level-retries 10; then
-    # Upload checksum file
-    timeout 60 rclone copy "$checksum_file" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 || echo "$LOG_PREFIX [$site_name] Checksum upload failed (backup OK)"
-    # Upload restore-path metadata file
-    timeout 60 rclone copy "$metadata_file" "$RCLONE_REMOTE:$RCLONE_PATH" --retries 3 || echo "$LOG_PREFIX [$site_name] Metadata upload failed (backup OK)"
-    rm -f "$archive_path" "$checksum_file" "$metadata_file"
+  # Backup site using restic
+  if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" backup "$webroot" \
+      --tag "files" \
+      --tag "site:${site_tag}" \
+      --host "$HOSTNAME" 2>&1; then
     ((success_count++)) || true
     echo "$LOG_PREFIX [$site_name] Done"
   else
-    echo "$LOG_PREFIX [$site_name] Upload failed"
-    rm -f "$checksum_file" "$metadata_file"
+    echo "$LOG_PREFIX [$site_name] FAILED"
     failures+=("$site_name")
   fi
 done
 
 if [[ $site_count -eq 0 ]]; then
-  echo "$LOG_PREFIX [WARNING] No sites found in $WWW_DIR"
+  echo "$LOG_PREFIX [WARNING] No sites found in pattern"
   send_notification "Files Backup Warning on $HOSTNAME" "No sites found" "backup_warning" "{}" "0" "bike"
   echo "==== $(date +%F' '%T) END (no sites) ===="
   exit 0
 fi
 
-# Retention cleanup
-if [[ "$RETENTION_MINUTES" -gt 0 ]]; then
-  echo "$LOG_PREFIX Running retention cleanup (keeping backups newer than $RETENTION_MINUTES minutes)..."
-  cleanup_count=0
-  cleanup_errors=0
-  cutoff_time=$(date -d "-$RETENTION_MINUTES minutes" +%s 2>/dev/null || date -v-${RETENTION_MINUTES}M +%s 2>/dev/null || echo 0)
-
-  if [[ "$cutoff_time" -gt 0 ]]; then
-    # List remote files and check their age
-    while IFS= read -r remote_file; do
-      [[ -z "$remote_file" ]] && continue
-      # Get file modification time from rclone
-      file_time=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_PATH/$remote_file" 2>&1 | awk '{print $2" "$3}' | head -1)
-      if [[ -n "$file_time" && ! "$file_time" =~ ^ERROR ]]; then
-        file_epoch=$(date -d "$file_time" +%s 2>/dev/null || echo 0)
-        if [[ "$file_epoch" -gt 0 && "$file_epoch" -lt "$cutoff_time" ]]; then
-          echo "$LOG_PREFIX   Deleting old backup: $remote_file"
-          delete_output=$(rclone delete "$RCLONE_REMOTE:$RCLONE_PATH/$remote_file" 2>&1)
-          if [[ $? -eq 0 ]]; then
-            ((cleanup_count++)) || true
-            # Also delete corresponding checksum file
-            rclone delete "$RCLONE_REMOTE:$RCLONE_PATH/${remote_file}.sha256" 2>/dev/null || true
-          else
-            echo "$LOG_PREFIX   [ERROR] Failed to delete $remote_file: $delete_output"
-            ((cleanup_errors++)) || true
-          fi
-        fi
-      fi
-    done < <(rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>&1)
-
-    if [[ $cleanup_errors -gt 0 ]]; then
-      echo "$LOG_PREFIX [WARNING] Retention cleanup completed with $cleanup_errors error(s). Removed $cleanup_count old backup(s)."
-      send_notification "Files Retention Cleanup Warning on $HOSTNAME" "Removed: $cleanup_count, Errors: $cleanup_errors" "retention_warning" "{}" "0" "bike"
-    elif [[ $cleanup_count -gt 0 ]]; then
-      echo "$LOG_PREFIX Retention cleanup complete. Removed $cleanup_count old backup(s)."
-      send_notification "Files Retention Cleanup on $HOSTNAME" "Removed $cleanup_count old backup(s)" "retention_cleanup" "{}" "-1" "none"
-    else
-      echo "$LOG_PREFIX Retention cleanup complete. No old backups to remove."
-    fi
-  else
-    echo "$LOG_PREFIX [WARNING] Could not calculate cutoff time, skipping cleanup"
-    send_notification "Files Retention Cleanup Failed on $HOSTNAME" "Could not calculate cutoff time" "retention_failed" "{}" "1" "falling"
-  fi
+# Apply retention policy
+write_progress "retention" 80 "Applying retention policy"
+echo "$LOG_PREFIX Applying retention policy (keeping backups within $RETENTION_DAYS days)..."
+if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
+    --tag "files" \
+    --keep-within "${RETENTION_DAYS}d" \
+    --prune 2>&1; then
+  echo "$LOG_PREFIX Retention policy applied"
+else
+  echo "$LOG_PREFIX [WARNING] Retention policy failed (backup succeeded)"
 fi
 
+# Summary
+write_progress "complete" 100 "Backup completed" "completed"
 if [[ ${#failures[@]} -gt 0 ]]; then
   send_notification "Files Backup Errors on $HOSTNAME" "Success: $success_count, Failed: ${failures[*]}" "backup_warning" "{}" "0" "bike"
   write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   exit 1
 else
-  send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up" "backup_complete" "{}" "0" "magic"
-  write_progress "complete" 100 "Backup completed successfully" "completed"
+  send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up via restic" "backup_complete" "{}" "0" "magic"
   echo "==== $(date +%F' '%T) END (success) ===="
 fi
 FILESBACKUPEOF
 
-  # Generate crypto functions and inject them
-  local crypto_functions
-  crypto_functions="$(generate_embedded_crypto "$SECRETS_DIR")"
-
-  local crypto_temp
-  crypto_temp="$(mktemp)"
-  echo "$crypto_functions" > "$crypto_temp"
-
+  # Replace placeholders
   sed -i \
-    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
     -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
     -e "s|%%RCLONE_PATH%%|$RCLONE_PATH|g" \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    -e "s|%%RETENTION_MINUTES%%|$RETENTION_MINUTES|g" \
+    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%RETENTION_DAYS%%|$RETENTION_DAYS|g" \
     -e "s|%%WEB_PATH_PATTERN%%|$WEB_PATH_PATTERN|g" \
     -e "s|%%WEBROOT_SUBDIR%%|$WEBROOT_SUBDIR|g" \
     "$SCRIPTS_DIR/files_backup.sh"
 
-  # Replace crypto functions placeholder (multi-line)
-  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/files_backup.sh"
-
-  rm -f "$crypto_temp"
   chmod +x "$SCRIPTS_DIR/files_backup.sh"
 }
 
-# ---------- Generate Files Restore Script ----------
+# ---------- Generate Restic Restore Script ----------
 
-generate_files_restore_script() {
-  local RCLONE_REMOTE="$1"
-  local RCLONE_PATH="$2"
+generate_restic_restore_script() {
+  local SECRETS_DIR="$1"
+  local RCLONE_REMOTE="$2"
+  local RCLONE_DB_PATH="$3"
+  local RCLONE_FILES_PATH="$4"
 
-  cat > "$SCRIPTS_DIR/files_restore.sh" << 'FILESRESTOREEOF'
+  cat > "$SCRIPTS_DIR/restore.sh" << 'RESTOREEOF'
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
 
+# ============================================================================
+# Backupd v3.0 - Restic Restore Script
+# Interactive restore from restic snapshots (database and files)
+# ============================================================================
+
+INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/restic.sh"
+source "$INSTALL_DIR/lib/crypto.sh"
+
+SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
-RCLONE_PATH="%%RCLONE_PATH%%"
-LOG_PREFIX="[FILES-RESTORE]"
+RCLONE_DB_PATH="%%RCLONE_DB_PATH%%"
+RCLONE_FILES_PATH="%%RCLONE_FILES_PATH%%"
+HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
 
-# Use same lock as backup to prevent conflicts
-LOCK_FILE="/var/lock/backupd-files.lock"
+# Secret file names
+SECRET_PASSPHRASE=".c1"
+SECRET_DB_USER=".c2"
+SECRET_DB_PASS=".c3"
 
-# Acquire lock (wait up to 60 seconds if backup is running)
-exec 9>"$LOCK_FILE"
-if ! flock -w 60 9; then
-  echo "$LOG_PREFIX ERROR: Could not acquire lock. A backup may be running."
-  echo "$LOG_PREFIX Please wait for the backup to complete and try again."
-  exit 1
-fi
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
 
-echo "========================================================"
-echo "           Files Restore Utility"
-echo "========================================================"
-echo
+# Cleanup function
+MYSQL_AUTH_FILE=""
+TEMP_SQL_FILE=""
+cleanup() {
+  local exit_code=$?
+  [[ -n "$MYSQL_AUTH_FILE" && -f "$MYSQL_AUTH_FILE" ]] && rm -f "$MYSQL_AUTH_FILE"
+  [[ -n "$TEMP_SQL_FILE" && -f "$TEMP_SQL_FILE" ]] && rm -f "$TEMP_SQL_FILE"
+  exit $exit_code
+}
+trap cleanup EXIT INT TERM
 
-TEMP_DIR="$(mktemp -d)"
-trap "rm -rf '$TEMP_DIR'" EXIT
-
-echo "Step 1: Select Site Backup"
-echo "--------------------------"
-echo "$LOG_PREFIX Fetching backups from $RCLONE_REMOTE:$RCLONE_PATH..."
-
-# Get unique site names from backups (each site has its own archive)
-declare -A SITE_BACKUPS=()
-declare -A SITE_BACKUP_LIST=()
-declare -a SITE_NAMES=()
-
-# Restore tracking
-declare -a RESTORED_SITES=()
-declare -a FAILED_SITES=()
-declare -a SKIPPED_SITES=()
-
-remote_files="$(rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH" --include "*.tar.gz" --exclude "*.sha256" 2>/dev/null | sort -r)" || true
-
-# Group backups by site name (format: sitename-YYYY-MM-DD-HHMM.tar.gz)
-# Store up to 3 most recent backups per site
-while IFS= read -r f; do
-  [[ -z "$f" ]] && continue
-  # Extract site name (everything before the timestamp)
-  site_name=$(echo "$f" | sed -E 's/-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}\.tar\.gz$//')
-  if [[ -n "$site_name" ]]; then
-    if [[ -z "${SITE_BACKUPS[$site_name]:-}" ]]; then
-      SITE_NAMES+=("$site_name")
-      SITE_BACKUPS[$site_name]="$f"  # Store most recent (already sorted)
-      SITE_BACKUP_LIST[$site_name]="$f"
-    else
-      # Add to list if we have less than 3 backups for this site
-      backup_count=$(echo "${SITE_BACKUP_LIST[$site_name]}" | tr '|' '\n' | wc -l)
-      if [[ $backup_count -lt 3 ]]; then
-        SITE_BACKUP_LIST[$site_name]="${SITE_BACKUP_LIST[$site_name]}|$f"
-      fi
-    fi
-  fi
-done <<< "$remote_files"
-
-echo "$LOG_PREFIX Found ${#SITE_NAMES[@]} site(s) with backups."
-[[ ${#SITE_NAMES[@]} -eq 0 ]] && { echo "$LOG_PREFIX No backups found."; exit 1; }
-
-echo
-echo "Available sites:"
-for i in "${!SITE_NAMES[@]}"; do
-  site="${SITE_NAMES[$i]}"
-  printf "  %2d) %s\n" "$((i+1))" "$site"
-  # Show up to 3 recent backups
-  IFS='|' read -ra backups <<< "${SITE_BACKUP_LIST[$site]}"
-  for j in "${!backups[@]}"; do
-    if [[ $j -eq 0 ]]; then
-      printf "      Latest: %s\n" "${backups[$j]}"
-    else
-      printf "             %s\n" "${backups[$j]}"
-    fi
-  done
-done
-echo
-echo "  A) Restore all sites (latest backup of each)"
-echo "  Q) Quit"
-echo
-read -p "Select site(s) to restore [1-${#SITE_NAMES[@]}, comma-separated, A for all]: " sel
-[[ "$sel" =~ ^[Qq]$ ]] && exit 0
-
-declare -a SELECTED_SITES=()
-if [[ "$sel" =~ ^[Aa]$ ]]; then
-  SELECTED_SITES=("${SITE_NAMES[@]}")
-else
-  IFS=',' read -ra sels <<< "$sel"
-  for s in "${sels[@]}"; do
-    s="$(echo "$s" | tr -d ' ')"
-    if [[ "$s" =~ ^[0-9]+$ ]] && [[ $s -ge 1 ]] && [[ $s -le ${#SITE_NAMES[@]} ]]; then
-      SELECTED_SITES+=("${SITE_NAMES[$((s-1))]}")
-    fi
-  done
-fi
-
-[[ ${#SELECTED_SITES[@]} -eq 0 ]] && { echo "No sites selected."; exit 0; }
-
-echo
-echo "Step 2: Confirm Restore"
-echo "-----------------------"
-echo "Sites to restore:"
-for site in "${SELECTED_SITES[@]}"; do
-  echo "  - $site (${SITE_BACKUPS[$site]})"
-done
-echo
-read -p "This will OVERWRITE existing sites. Continue? (yes/no): " confirm
-[[ ! "$confirm" =~ ^[Yy][Ee][Ss]$ ]] && exit 0
-
-# Pre-flight check: identify sites missing restore-path metadata
-echo
-echo "Step 2b: Pre-flight Check"
-echo "-------------------------"
-echo "$LOG_PREFIX Checking restore path metadata for selected sites..."
-
-declare -a SITES_NEED_PATH=()
-declare -A SITE_RESTORE_PATHS=()
-
-for site in "${SELECTED_SITES[@]}"; do
-  restore_path_file="${site}.restore-path"
-  if rclone lsf "$RCLONE_REMOTE:$RCLONE_PATH/$restore_path_file" &>/dev/null; then
-    # Metadata exists - fetch it
-    if rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$restore_path_file" "$TEMP_DIR/" 2>/dev/null; then
-      SITE_RESTORE_PATHS[$site]=$(cat "$TEMP_DIR/$restore_path_file" 2>/dev/null)
-      rm -f "$TEMP_DIR/$restore_path_file"
-      echo "$LOG_PREFIX   $site: OK (path: ${SITE_RESTORE_PATHS[$site]})"
-    else
-      SITES_NEED_PATH+=("$site")
-      echo "$LOG_PREFIX   $site: NEEDS MANUAL PATH (fetch failed)"
-    fi
-  else
-    SITES_NEED_PATH+=("$site")
-    echo "$LOG_PREFIX   $site: NEEDS MANUAL PATH (no metadata)"
-  fi
-done
-
-# If any sites need manual paths, ask upfront
-if [[ ${#SITES_NEED_PATH[@]} -gt 0 ]]; then
+# Output helpers
+print_header() {
+  clear
+  echo -e "${CYAN}========================================${NC}"
+  echo -e "${CYAN}    Backupd v3.0 - Restore Menu${NC}"
+  echo -e "${CYAN}========================================${NC}"
   echo
-  echo "$LOG_PREFIX ${#SITES_NEED_PATH[@]} site(s) require manual restore path entry."
-  echo "$LOG_PREFIX You will be prompted for each during restore."
-  echo
-  read -p "Continue with restore? (y/N): " continue_restore
-  if [[ ! "$continue_restore" =~ ^[Yy]$ ]]; then
-    echo "$LOG_PREFIX Restore cancelled."
-    exit 0
-  fi
-fi
-
-echo
-echo "Step 3: Restoring Sites"
-echo "-----------------------"
-
-for site in "${SELECTED_SITES[@]}"; do
-  backup_file="${SITE_BACKUPS[$site]}"
-  echo
-  echo "$LOG_PREFIX Restoring: $site"
-  echo "$LOG_PREFIX   Backup: $backup_file"
-
-  # Download backup
-  echo "$LOG_PREFIX   Downloading..."
-  if ! rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$backup_file" "$TEMP_DIR/" --progress; then
-    echo "$LOG_PREFIX   [ERROR] Download failed"
-    FAILED_SITES+=("$site:download_failed")
-    continue
-  fi
-
-  local_file="$TEMP_DIR/$backup_file"
-
-  # Verify checksum if available
-  checksum_file="${backup_file}.sha256"
-  if rclone copy "$RCLONE_REMOTE:$RCLONE_PATH/$checksum_file" "$TEMP_DIR/" 2>/dev/null; then
-    echo "$LOG_PREFIX   Verifying checksum..."
-    stored=$(cat "$TEMP_DIR/$checksum_file")
-    calculated=$(sha256sum "$local_file" | awk '{print $1}')
-    if [[ "$stored" == "$calculated" ]]; then
-      echo "$LOG_PREFIX   Checksum: OK"
-    else
-      echo "$LOG_PREFIX   [ERROR] Checksum mismatch!"
-      echo "$LOG_PREFIX     Expected: $stored"
-      echo "$LOG_PREFIX     Got:      $calculated"
-      read -p "  Continue with this backup anyway? (y/N): " continue_anyway
-      if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-        rm -f "$local_file" "$TEMP_DIR/$checksum_file"
-        SKIPPED_SITES+=("$site:checksum_mismatch")
-        continue
-      fi
-    fi
-    rm -f "$TEMP_DIR/$checksum_file"
-  else
-    echo "$LOG_PREFIX   [INFO] No checksum file found"
-  fi
-
-  # Use pre-fetched restore path from metadata (or empty if not found)
-  restore_path="${SITE_RESTORE_PATHS[$site]:-}"
-  if [[ -n "$restore_path" ]]; then
-    echo "$LOG_PREFIX   Restore path from metadata: $restore_path"
-  fi
-
-  # If no metadata file, try to determine restore path from archive or prompt user
-  if [[ -z "$restore_path" ]]; then
-    echo "$LOG_PREFIX   [DEBUG] No metadata restore path - detecting archive format..."
-    # Check archive structure - old format had directory name, new format has ./
-    # Use pigz if available (backups are compressed with pigz)
-    if command -v pigz >/dev/null 2>&1; then
-      first_entry=$(tar -I pigz -tf "$local_file" 2>/dev/null | head -1)
-      echo "$LOG_PREFIX   [DEBUG] Using pigz to read archive, first_entry='$first_entry'"
-    else
-      first_entry=$(tar -tzf "$local_file" 2>/dev/null | head -1)
-      echo "$LOG_PREFIX   [DEBUG] Using gzip to read archive, first_entry='$first_entry'"
-    fi
-    if [[ "$first_entry" == "./" || "$first_entry" == "." ]]; then
-      # New format: contents only, no metadata - need user input
-      echo "$LOG_PREFIX   [INFO] New backup format detected (contents only)"
-      echo "$LOG_PREFIX   [WARNING] No restore-path metadata found for this backup."
-      echo "$LOG_PREFIX   This backup was made with v1.4.0+ but is missing its metadata file."
-      echo ""
-      read -p "  Enter full path to restore to (e.g., /var/www/mysite/public_html): " restore_path
-      if [[ -z "$restore_path" ]]; then
-        echo "$LOG_PREFIX   [ERROR] No restore path provided."
-        rm -f "$local_file"
-        SKIPPED_SITES+=("$site:no_path_provided")
-        continue
-      fi
-      if [[ ! -d "$restore_path" ]]; then
-        echo "$LOG_PREFIX   [WARNING] Path does not exist: $restore_path"
-        read -p "  Create this directory? (y/N): " create_dir
-        if [[ "$create_dir" =~ ^[Yy]$ ]]; then
-          if ! mkdir -p "$restore_path"; then
-            echo "$LOG_PREFIX   [ERROR] Could not create directory"
-            rm -f "$local_file"
-            FAILED_SITES+=("$site:mkdir_failed")
-            continue
-          fi
-        else
-          rm -f "$local_file"
-          SKIPPED_SITES+=("$site:path_not_created")
-          continue
-        fi
-      fi
-    else
-      # Old format: archive contains directory name - also prompt for base path
-      dir_name=$(echo "$first_entry" | cut -d'/' -f1)
-      if [[ -z "$dir_name" ]]; then
-        echo "$LOG_PREFIX   [ERROR] Could not determine directory name from archive"
-        rm -f "$local_file"
-        FAILED_SITES+=("$site:invalid_archive")
-        continue
-      fi
-      echo "$LOG_PREFIX   [INFO] Old backup format detected (directory: $dir_name)"
-      echo "$LOG_PREFIX   [INFO] This backup contains the full directory structure."
-      echo ""
-      read -p "  Enter base path to extract to (default: /var/www): " base_path
-      base_path="${base_path:-/var/www}"
-      restore_path="$base_path/$dir_name"
-      echo "$LOG_PREFIX   Will restore to: $restore_path"
-    fi
-  fi
-
-  echo "$LOG_PREFIX   Extracting to: $restore_path"
-
-  # For new format (contents only), extract INTO the existing directory
-  # For old format, extract the directory itself
-
-  # DEBUG: Show archive info
-  echo "$LOG_PREFIX   DEBUG: Archive file: $local_file"
-  echo "$LOG_PREFIX   DEBUG: Archive size: $(ls -lh "$local_file" 2>/dev/null | awk '{print $5}')"
-
-  # List archive contents - try pigz first, then gzip
-  # Note: Use 2>/dev/null to avoid SIGPIPE with pipefail when head closes early
-  if command -v pigz >/dev/null 2>&1; then
-    first_entry=$(tar -I pigz -tf "$local_file" 2>/dev/null | head -1 || true)
-    archive_list_method="pigz"
-  else
-    first_entry=$(tar -tzf "$local_file" 2>/dev/null | head -1 || true)
-    archive_list_method="gzip"
-  fi
-
-  echo "$LOG_PREFIX   DEBUG: List method: $archive_list_method"
-  echo "$LOG_PREFIX   DEBUG: First entry: '$first_entry'"
-  echo "$LOG_PREFIX   DEBUG: Archive contents (first 10):"
-  if command -v pigz >/dev/null 2>&1; then
-    tar -I pigz -tf "$local_file" 2>/dev/null | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done || true
-  else
-    tar -tzf "$local_file" 2>/dev/null | head -10 | while read -r line; do echo "$LOG_PREFIX     $line"; done || true
-  fi
-
-  if [[ "$first_entry" == "./" || "$first_entry" == "." ]]; then
-    # NEW FORMAT: Contents only - extract INTO existing directory
-    # This preserves the public_html directory itself (important for overlay containers)
-
-    if [[ ! -d "$restore_path" ]]; then
-      echo "$LOG_PREFIX   [ERROR] Restore path does not exist: $restore_path"
-      rm -f "$local_file"
-      FAILED_SITES+=("$site:path_not_exists")
-      continue
-    fi
-
-    # Backup existing contents (not the directory itself)
-    backup_name=""
-    backup_path="${restore_path}.contents-backup-$(date +%Y%m%d-%H%M%S)"
-    echo "$LOG_PREFIX   Backing up existing contents..."
-    if mkdir -p "$backup_path" && cp -a "$restore_path"/. "$backup_path"/ 2>/dev/null; then
-      backup_name="$backup_path"
-    else
-      echo "$LOG_PREFIX   [WARNING] Could not backup existing contents"
-    fi
-
-    # Clear existing contents and extract new ones
-    echo "$LOG_PREFIX   Clearing existing contents..."
-    find "$restore_path" -mindepth 1 -delete 2>/dev/null || rm -rf "$restore_path"/* "$restore_path"/.[!.]* 2>/dev/null
-
-    # Extract archive - use pigz if available (matches backup compression)
-    echo "$LOG_PREFIX   Extracting archive..."
-    extract_error=""
-    if command -v pigz >/dev/null 2>&1; then
-      # Use pigz for decompression (same as backup)
-      if ! tar -I pigz -xpf "$local_file" -C "$restore_path" 2>&1; then
-        extract_error="tar with pigz failed"
-      fi
-    else
-      # Fall back to gzip
-      if ! tar -xzpf "$local_file" -C "$restore_path" 2>&1; then
-        extract_error="tar with gzip failed"
-      fi
-    fi
-
-    # Verify extraction actually produced files
-    file_count=$(find "$restore_path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
-
-    if [[ -z "$extract_error" && $file_count -gt 0 ]]; then
-      echo "$LOG_PREFIX   Success ($file_count items extracted)"
-      # Fix ownership - contents should be user:user, directory keeps user:www-data
-      dir_user=$(stat -c '%U' "$restore_path" 2>/dev/null || echo "www-data")
-      # Apply user:user to contents only (preserve directory group for web server access)
-      find "$restore_path" -mindepth 1 -exec chown "$dir_user:$dir_user" {} + 2>/dev/null || true
-      echo "$LOG_PREFIX   Ownership set to: $dir_user:$dir_user (contents)"
-      # Remove backup on success
-      [[ -n "$backup_name" && -d "$backup_name" ]] && rm -rf "$backup_name" || true
-      RESTORED_SITES+=("$site")
-    else
-      if [[ -n "$extract_error" ]]; then
-        echo "$LOG_PREFIX   [ERROR] $extract_error"
-      elif [[ $file_count -eq 0 ]]; then
-        echo "$LOG_PREFIX   [ERROR] Extraction produced no files!"
-        echo "$LOG_PREFIX   Archive may be empty or corrupted"
-      fi
-      # Restore backup if we made one
-      if [[ -n "$backup_name" && -d "$backup_name" ]]; then
-        rm -rf "$restore_path"/* "$restore_path"/.[!.]* 2>/dev/null
-        cp -a "$backup_name"/. "$restore_path"/ 2>/dev/null
-        rm -rf "$backup_name"
-        echo "$LOG_PREFIX   Restored original contents"
-      fi
-      FAILED_SITES+=("$site:extraction_failed")
-    fi
-  else
-    # OLD FORMAT: Archive contains full directory - replace entire directory
-    dir_name=$(echo "$first_entry" | cut -d'/' -f1)
-    # Extract base_path from restore_path (restore_path = base_path/dir_name)
-    extract_base_path="$(dirname "$restore_path")"
-
-    # Backup existing directory if it exists
-    backup_name=""
-    if [[ -d "$restore_path" ]]; then
-      backup_name="${dir_name}.pre-restore-$(date +%Y%m%d-%H%M%S)"
-      echo "$LOG_PREFIX   Backing up existing to: $backup_name"
-      mv "$restore_path" "$extract_base_path/$backup_name"
-    fi
-
-    # Extract archive - use pigz if available (matches backup compression)
-    echo "$LOG_PREFIX   Extracting archive..."
-    extract_error=""
-    if command -v pigz >/dev/null 2>&1; then
-      if ! tar -I pigz -xpf "$local_file" -C "$extract_base_path" 2>&1; then
-        extract_error="tar with pigz failed"
-      fi
-    else
-      if ! tar -xzpf "$local_file" -C "$extract_base_path" 2>&1; then
-        extract_error="tar with gzip failed"
-      fi
-    fi
-
-    # Verify extraction actually produced the directory
-    if [[ -z "$extract_error" && -d "$restore_path" ]]; then
-      file_count=$(find "$restore_path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
-      echo "$LOG_PREFIX   Success ($file_count items in restored directory)"
-      # Remove temp backup on success
-      [[ -n "$backup_name" && -d "$extract_base_path/$backup_name" ]] && rm -rf "$extract_base_path/$backup_name" || true
-      RESTORED_SITES+=("$site")
-    else
-      if [[ -n "$extract_error" ]]; then
-        echo "$LOG_PREFIX   [ERROR] $extract_error"
-      elif [[ ! -d "$restore_path" ]]; then
-        echo "$LOG_PREFIX   [ERROR] Expected directory not created: $restore_path"
-      fi
-      # Restore the backup if we made one
-      if [[ -n "$backup_name" && -d "$extract_base_path/$backup_name" ]]; then
-        mv "$extract_base_path/$backup_name" "$restore_path"
-        echo "$LOG_PREFIX   Restored original directory"
-      fi
-      FAILED_SITES+=("$site:extraction_failed")
-    fi
-  fi
-
-  rm -f "$local_file"
-done
-
-# Final Summary
-echo
-echo "========================================================"
-echo "           Restore Summary"
-echo "========================================================"
-echo
-echo "Total sites selected: ${#SELECTED_SITES[@]}"
-echo
-
-if [[ ${#RESTORED_SITES[@]} -gt 0 ]]; then
-  echo "RESTORED SUCCESSFULLY (${#RESTORED_SITES[@]}):"
-  for site in "${RESTORED_SITES[@]}"; do
-    echo "  [OK] $site"
-  done
-  echo
-fi
-
-if [[ ${#FAILED_SITES[@]} -gt 0 ]]; then
-  echo "FAILED (${#FAILED_SITES[@]}):"
-  for entry in "${FAILED_SITES[@]}"; do
-    site="${entry%%:*}"
-    reason="${entry#*:}"
-    case "$reason" in
-      download_failed)    reason_text="Download failed" ;;
-      extraction_failed)  reason_text="Extraction failed" ;;
-      mkdir_failed)       reason_text="Could not create directory" ;;
-      path_not_exists)    reason_text="Restore path does not exist" ;;
-      invalid_archive)    reason_text="Invalid archive format" ;;
-      *)                  reason_text="$reason" ;;
-    esac
-    echo "  [FAIL] $site - $reason_text"
-  done
-  echo
-fi
-
-if [[ ${#SKIPPED_SITES[@]} -gt 0 ]]; then
-  echo "SKIPPED (${#SKIPPED_SITES[@]}):"
-  for entry in "${SKIPPED_SITES[@]}"; do
-    site="${entry%%:*}"
-    reason="${entry#*:}"
-    case "$reason" in
-      checksum_mismatch)  reason_text="Checksum mismatch (user declined)" ;;
-      no_path_provided)   reason_text="No restore path provided" ;;
-      path_not_created)   reason_text="User declined to create path" ;;
-      *)                  reason_text="$reason" ;;
-    esac
-    echo "  [SKIP] $site - $reason_text"
-  done
-  echo
-fi
-
-# Final status
-if [[ ${#RESTORED_SITES[@]} -eq ${#SELECTED_SITES[@]} ]]; then
-  echo "Status: ALL SITES RESTORED SUCCESSFULLY"
-elif [[ ${#RESTORED_SITES[@]} -gt 0 ]]; then
-  echo "Status: PARTIAL RESTORE (${#RESTORED_SITES[@]}/${#SELECTED_SITES[@]} succeeded)"
-else
-  echo "Status: NO SITES RESTORED"
-fi
-
-echo "========================================================"
-echo
-read -p "Press Enter to continue..." _
-FILESRESTOREEOF
-
-  sed -i \
-    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
-    -e "s|%%RCLONE_PATH%%|$RCLONE_PATH|g" \
-    "$SCRIPTS_DIR/files_restore.sh"
-
-  chmod +x "$SCRIPTS_DIR/files_restore.sh"
 }
 
-# ---------- Generate Verify Script ----------
-# This generates a QUICK verification script for scheduled runs
-# It does NOT download backups - only checks file/checksum existence
-# For full verification, use the interactive menu
+print_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+print_info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 
-generate_verify_script() {
-  local secrets_dir rclone_remote rclone_db_path rclone_files_path
-  secrets_dir="$(get_secrets_dir)"
-  rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
-  rclone_db_path="$(get_config_value 'RCLONE_DB_PATH')"
-  rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
+press_enter() {
+  echo
+  read -p "Press Enter to continue..." _
+}
 
+# Get restic password
+RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
+if [[ -z "$RESTIC_PASSWORD" ]]; then
+  print_error "No repository password found in secrets"
+  exit 2
+fi
+
+# Build repository URLs
+DB_REPO=""
+FILES_REPO=""
+[[ -n "$RCLONE_DB_PATH" ]] && DB_REPO="rclone:${RCLONE_REMOTE}:${RCLONE_DB_PATH}"
+[[ -n "$RCLONE_FILES_PATH" ]] && FILES_REPO="rclone:${RCLONE_REMOTE}:${RCLONE_FILES_PATH}"
+
+# ---------- Database Restore Functions ----------
+
+list_db_snapshots_menu() {
+  if [[ -z "$DB_REPO" ]]; then
+    print_error "Database backups not configured"
+    return 1
+  fi
+
+  print_info "Fetching database snapshots..."
+  echo
+
+  local snapshots_json
+  snapshots_json="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$DB_REPO" snapshots --tag database --json 2>/dev/null || echo "[]")"
+
+  if [[ "$snapshots_json" == "[]" || -z "$snapshots_json" ]]; then
+    print_warning "No database snapshots found"
+    return 1
+  fi
+
+  # Parse and display snapshots
+  echo -e "${BOLD}Available Database Snapshots:${NC}"
+  echo "-------------------------------------------"
+  printf "%-10s %-20s %-15s %s\n" "ID" "DATE" "DATABASE" "HOST"
+  echo "-------------------------------------------"
+
+  # Parse JSON and display (using grep/sed for portability)
+  local count=0
+  while IFS= read -r line; do
+    local short_id time hostname tags
+    short_id="$(echo "$line" | grep -o '"short_id":"[^"]*"' | cut -d'"' -f4)"
+    time="$(echo "$line" | grep -o '"time":"[^"]*"' | cut -d'"' -f4 | cut -d'T' -f1,2 | tr 'T' ' ' | cut -d'.' -f1)"
+    hostname="$(echo "$line" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4)"
+    tags="$(echo "$line" | grep -o '"tags":\[[^]]*\]' | grep -o 'db:[^"]*' | head -1)"
+    db_name="${tags#db:}"
+
+    [[ -n "$short_id" ]] && printf "%-10s %-20s %-15s %s\n" "$short_id" "$time" "${db_name:-unknown}" "$hostname"
+    ((count++)) || true
+  done < <(echo "$snapshots_json" | tr '},{' '\n' | grep -E '"short_id"')
+
+  echo "-------------------------------------------"
+  echo "Total: $count snapshot(s)"
+  echo
+}
+
+restore_database_menu() {
+  if [[ -z "$DB_REPO" ]]; then
+    print_error "Database backups not configured"
+    press_enter
+    return
+  fi
+
+  print_header
+  echo "Restore Database from Snapshot"
+  echo "==============================="
+  echo
+
+  list_db_snapshots_menu || { press_enter; return; }
+
+  echo
+  echo "Enter snapshot ID to restore (or 'latest' for most recent):"
+  read -p "> " snapshot_input
+
+  [[ -z "$snapshot_input" ]] && { print_warning "No snapshot selected"; press_enter; return; }
+
+  local snapshot_id="$snapshot_input"
+  if [[ "$snapshot_input" == "latest" ]]; then
+    snapshot_id="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$DB_REPO" snapshots --tag database --json --latest 1 2>/dev/null | grep -o '"short_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+    if [[ -z "$snapshot_id" ]]; then
+      print_error "Could not find latest snapshot"
+      press_enter
+      return
+    fi
+    print_info "Using latest snapshot: $snapshot_id"
+  fi
+
+  # Get database name from snapshot tags
+  local snapshot_info db_name
+  snapshot_info="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$DB_REPO" snapshots "$snapshot_id" --json 2>/dev/null || echo "[]")"
+  db_name="$(echo "$snapshot_info" | grep -o 'db:[^"]*' | head -1)"
+  db_name="${db_name#db:}"
+  [[ -z "$db_name" ]] && db_name="unknown"
+
+  echo
+  echo -e "${YELLOW}WARNING: This will restore database '$db_name' from snapshot $snapshot_id${NC}"
+  echo -e "${YELLOW}The existing database will be OVERWRITTEN!${NC}"
+  echo
+  read -p "Type 'yes' to confirm: " confirm
+  [[ "$confirm" != "yes" ]] && { print_warning "Restore cancelled"; press_enter; return; }
+
+  # Detect database client
+  local DB_CLIENT DB_IMPORT
+  if command -v mariadb >/dev/null 2>&1; then
+    DB_CLIENT="mariadb"; DB_IMPORT="mariadb"
+  elif command -v mysql >/dev/null 2>&1; then
+    DB_CLIENT="mysql"; DB_IMPORT="mysql"
+  else
+    print_error "No database client found (mysql/mariadb)"
+    press_enter
+    return
+  fi
+
+  # Get database credentials
+  local DB_USER DB_PASS MYSQL_ARGS
+  DB_USER="$(get_secret "$SECRETS_DIR" "$SECRET_DB_USER" || echo "")"
+  DB_PASS="$(get_secret "$SECRETS_DIR" "$SECRET_DB_PASS" || echo "")"
+  MYSQL_ARGS=()
+
+  if [[ -n "$DB_USER" && -n "$DB_PASS" ]]; then
+    MYSQL_AUTH_FILE="$(mktemp)"
+    chmod 600 "$MYSQL_AUTH_FILE"
+    cat > "$MYSQL_AUTH_FILE" << AUTHEOF
+[client]
+user=$DB_USER
+password=$DB_PASS
+AUTHEOF
+    MYSQL_ARGS=("--defaults-extra-file=$MYSQL_AUTH_FILE")
+  fi
+
+  # Dump snapshot to temp file
+  echo
+  print_info "Extracting database from snapshot..."
+  TEMP_SQL_FILE="$(mktemp --suffix=.sql)"
+  chmod 600 "$TEMP_SQL_FILE"
+
+  if ! RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$DB_REPO" dump "$snapshot_id" / > "$TEMP_SQL_FILE" 2>/dev/null; then
+    print_error "Failed to extract database from snapshot"
+    press_enter
+    return
+  fi
+
+  local sql_size
+  sql_size="$(stat -c%s "$TEMP_SQL_FILE" 2>/dev/null || echo 0)"
+  if [[ "$sql_size" -lt 100 ]]; then
+    print_error "Extracted file too small ($sql_size bytes) - snapshot may be corrupt"
+    press_enter
+    return
+  fi
+
+  print_success "Extracted $(numfmt --to=iec "$sql_size" 2>/dev/null || echo "$sql_size bytes")"
+
+  # Import to database
+  print_info "Importing database..."
+  if $DB_IMPORT "${MYSQL_ARGS[@]}" < "$TEMP_SQL_FILE" 2>&1; then
+    print_success "Database '$db_name' restored successfully!"
+  else
+    print_error "Database import failed"
+  fi
+
+  press_enter
+}
+
+# ---------- Files Restore Functions ----------
+
+list_files_snapshots_menu() {
+  if [[ -z "$FILES_REPO" ]]; then
+    print_error "Files backups not configured"
+    return 1
+  fi
+
+  print_info "Fetching files snapshots..."
+  echo
+
+  local snapshots_json
+  snapshots_json="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$FILES_REPO" snapshots --tag files --json 2>/dev/null || echo "[]")"
+
+  if [[ "$snapshots_json" == "[]" || -z "$snapshots_json" ]]; then
+    print_warning "No files snapshots found"
+    return 1
+  fi
+
+  # Parse and display snapshots
+  echo -e "${BOLD}Available Files Snapshots:${NC}"
+  echo "-------------------------------------------"
+  printf "%-10s %-20s %-20s %s\n" "ID" "DATE" "SITE" "HOST"
+  echo "-------------------------------------------"
+
+  local count=0
+  while IFS= read -r line; do
+    local short_id time hostname tags
+    short_id="$(echo "$line" | grep -o '"short_id":"[^"]*"' | cut -d'"' -f4)"
+    time="$(echo "$line" | grep -o '"time":"[^"]*"' | cut -d'"' -f4 | cut -d'T' -f1,2 | tr 'T' ' ' | cut -d'.' -f1)"
+    hostname="$(echo "$line" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4)"
+    tags="$(echo "$line" | grep -o '"tags":\[[^]]*\]' | grep -o 'site:[^"]*' | head -1)"
+    site_name="${tags#site:}"
+
+    [[ -n "$short_id" ]] && printf "%-10s %-20s %-20s %s\n" "$short_id" "$time" "${site_name:-unknown}" "$hostname"
+    ((count++)) || true
+  done < <(echo "$snapshots_json" | tr '},{' '\n' | grep -E '"short_id"')
+
+  echo "-------------------------------------------"
+  echo "Total: $count snapshot(s)"
+  echo
+}
+
+restore_files_menu() {
+  if [[ -z "$FILES_REPO" ]]; then
+    print_error "Files backups not configured"
+    press_enter
+    return
+  fi
+
+  print_header
+  echo "Restore Files from Snapshot"
+  echo "============================"
+  echo
+
+  list_files_snapshots_menu || { press_enter; return; }
+
+  echo
+  echo "Enter snapshot ID to restore (or 'latest' for most recent):"
+  read -p "> " snapshot_input
+
+  [[ -z "$snapshot_input" ]] && { print_warning "No snapshot selected"; press_enter; return; }
+
+  local snapshot_id="$snapshot_input"
+  if [[ "$snapshot_input" == "latest" ]]; then
+    snapshot_id="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$FILES_REPO" snapshots --tag files --json --latest 1 2>/dev/null | grep -o '"short_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+    if [[ -z "$snapshot_id" ]]; then
+      print_error "Could not find latest snapshot"
+      press_enter
+      return
+    fi
+    print_info "Using latest snapshot: $snapshot_id"
+  fi
+
+  # Get snapshot paths
+  echo
+  print_info "Snapshot contents:"
+  local snapshot_paths
+  snapshot_paths="$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$FILES_REPO" ls "$snapshot_id" --json 2>/dev/null | grep -o '"path":"[^"]*"' | cut -d'"' -f4 | head -20)"
+  echo "$snapshot_paths" | head -10
+  echo "..."
+  echo
+
+  echo "Restore options:"
+  echo "  1) Restore to original location (overwrites existing files)"
+  echo "  2) Restore to custom directory"
+  echo "  3) Cancel"
+  echo
+  read -p "Select option [1-3]: " restore_option
+
+  local target_path=""
+  case "$restore_option" in
+    1)
+      target_path="/"
+      echo
+      echo -e "${YELLOW}WARNING: This will restore files to their ORIGINAL locations!${NC}"
+      echo -e "${YELLOW}Existing files will be OVERWRITTEN!${NC}"
+      ;;
+    2)
+      echo
+      read -p "Enter target directory path: " target_path
+      if [[ -z "$target_path" ]]; then
+        print_warning "No path specified"
+        press_enter
+        return
+      fi
+      if [[ ! -d "$target_path" ]]; then
+        echo "Directory does not exist. Create it? [y/N]: "
+        read -r create_dir
+        if [[ "$create_dir" =~ ^[Yy] ]]; then
+          mkdir -p "$target_path" || { print_error "Failed to create directory"; press_enter; return; }
+        else
+          press_enter
+          return
+        fi
+      fi
+      ;;
+    *)
+      print_warning "Restore cancelled"
+      press_enter
+      return
+      ;;
+  esac
+
+  echo
+  read -p "Type 'yes' to confirm restore to '$target_path': " confirm
+  [[ "$confirm" != "yes" ]] && { print_warning "Restore cancelled"; press_enter; return; }
+
+  echo
+  print_info "Restoring files from snapshot $snapshot_id..."
+
+  if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$FILES_REPO" restore "$snapshot_id" --target "$target_path" 2>&1; then
+    print_success "Files restored successfully to $target_path"
+  else
+    print_error "Files restore failed"
+  fi
+
+  press_enter
+}
+
+# ---------- Main Menu ----------
+
+main_menu() {
+  while true; do
+    print_header
+
+    echo "What would you like to restore?"
+    echo
+    echo "  1) Restore database"
+    echo "  2) Restore files/sites"
+    echo "  3) List database snapshots"
+    echo "  4) List files snapshots"
+    echo "  5) Exit"
+    echo
+    read -p "Select option [1-5]: " choice
+
+    case "$choice" in
+      1) restore_database_menu ;;
+      2) restore_files_menu ;;
+      3)
+        print_header
+        echo "Database Snapshots"
+        echo "=================="
+        echo
+        list_db_snapshots_menu
+        press_enter
+        ;;
+      4)
+        print_header
+        echo "Files Snapshots"
+        echo "==============="
+        echo
+        list_files_snapshots_menu
+        press_enter
+        ;;
+      5|q|"") exit 0 ;;
+      *) print_warning "Invalid option" ;;
+    esac
+  done
+}
+
+# Run main menu
+main_menu
+RESTOREEOF
+
+  # Replace placeholders
+  sed -i \
+    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
+    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
+    -e "s|%%RCLONE_DB_PATH%%|$RCLONE_DB_PATH|g" \
+    -e "s|%%RCLONE_FILES_PATH%%|$RCLONE_FILES_PATH|g" \
+    "$SCRIPTS_DIR/restore.sh"
+
+  chmod +x "$SCRIPTS_DIR/restore.sh"
+}
+
+# ---------- Generate Restic Verify Scripts ----------
+# Creates two verify scripts:
+#   - verify_backup.sh: Weekly quick check (restic check)
+#   - verify_full_backup.sh: Monthly full check (restic check --read-data)
+
+generate_restic_verify_script() {
+  local SECRETS_DIR="$1"
+  local RCLONE_REMOTE="$2"
+  local RCLONE_DB_PATH="$3"
+  local RCLONE_FILES_PATH="$4"
+
+  local LOGS_DIR="$INSTALL_DIR/logs"
+  mkdir -p "$LOGS_DIR"
+
+  # ---------- Generate Quick Verify Script (for weekly runs) ----------
   cat > "$SCRIPTS_DIR/verify_backup.sh" << 'VERIFYEOF'
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
 
 # ============================================================================
-# Backupd - Quick Verification Script (Scheduled Mode)
-# Checks backup existence and checksums WITHOUT downloading
-# For full verification (with decryption test), use: sudo backupd -> Verify
+# Backupd v3.0 - Restic Quick Verification Script
+# Verifies repository integrity using restic check (metadata only)
+# Recommended: Run weekly via systemd timer
 # ============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
-LOGS_DIR="%%LOGS_DIR%%"
+INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/restic.sh"
+source "$INSTALL_DIR/lib/crypto.sh"
+
+SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
 RCLONE_DB_PATH="%%RCLONE_DB_PATH%%"
 RCLONE_FILES_PATH="%%RCLONE_FILES_PATH%%"
-SECRETS_DIR="%%SECRETS_DIR%%"
+LOGS_DIR="%%LOGS_DIR%%"
 HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
-LOG_FILE="$LOGS_DIR/verify_logfile.log"
+LOG_PREFIX="[VERIFY-QUICK]"
 
-# Full verification tracking
-LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
-FULL_VERIFY_INTERVAL_DAYS=30
-
+# Secret file names
+SECRET_PASSPHRASE=".c1"
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
@@ -1870,138 +1312,13 @@ SECRET_WEBHOOK_TOKEN=".c7"
 SECRET_PUSHOVER_USER=".c8"
 SECRET_PUSHOVER_TOKEN=".c9"
 
-%%CRYPTO_FUNCTIONS%%
-
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
-}
-
-# Notification functions
-NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
-NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
-WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
-WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
-PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
-PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
-
-# Notification failure log
-NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
-
-# Robust ntfy sender with retry (3 attempts, exponential backoff)
-send_ntfy() {
-  local title="$1" message="$2"
-  [[ -z "$NTFY_URL" ]] && return 0
-
-  local attempt=1 max_attempts=3 delay=2 http_code
-  while [[ $attempt -le $max_attempts ]]; do
-    if [[ -n "$NTFY_TOKEN" ]]; then
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" \
-        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
-    else
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -H "Title: $title" -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
-    fi
-
-    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
-
-    if [[ $attempt -lt $max_attempts ]]; then
-      sleep $delay
-      delay=$((delay * 2))
-    fi
-    ((attempt++))
-  done
-
-  echo "[$(date -Iseconds)] NTFY FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
-  return 1
-}
-
-# Robust webhook sender with retry (3 attempts, exponential backoff)
-send_webhook() {
-  local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}"
-  [[ -z "$WEBHOOK_URL" ]] && return 0
-
-  local timestamp json_payload http_code
-  timestamp="$(date -Iseconds)"
-  json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
-
-  local attempt=1 max_attempts=3 delay=2
-  while [[ $attempt -le $max_attempts ]]; do
-    if [[ -n "$WEBHOOK_TOKEN" ]]; then
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
-    else
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
-        -d "$json_payload" 2>/dev/null) || http_code="000"
-    fi
-
-    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
-
-    if [[ $attempt -lt $max_attempts ]]; then
-      sleep $delay
-      delay=$((delay * 2))
-    fi
-    ((attempt++))
-  done
-
-  echo "[$(date -Iseconds)] WEBHOOK FAILED: event='$event' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
-  return 1
-}
-
-# Robust Pushover sender with retry (3 attempts, exponential backoff)
-send_pushover() {
-  local title="$1" message="$2" priority="${3:-0}" sound="${4:-pushover}"
-  [[ -z "$PUSHOVER_USER" || -z "$PUSHOVER_TOKEN" ]] && return 0
-
-  local attempt=1 max_attempts=3 delay=2 http_code
-  while [[ $attempt -le $max_attempts ]]; do
-    http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-      --form-string "token=$PUSHOVER_TOKEN" \
-      --form-string "user=$PUSHOVER_USER" \
-      --form-string "title=$title" \
-      --form-string "message=$message" \
-      --form-string "priority=$priority" \
-      --form-string "sound=$sound" \
-      https://api.pushover.net/1/messages.json 2>/dev/null) || http_code="000"
-
-    [[ "$http_code" == "200" ]] && return 0
-
-    if [[ $attempt -lt $max_attempts ]]; then
-      sleep $delay
-      delay=$((delay * 2))
-    fi
-    ((attempt++))
-  done
-
-  echo "[$(date -Iseconds)] PUSHOVER FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
-  return 1
-}
-
-# Send to all channels, track failures
-send_notification() {
-  local title="$1" message="$2" event="${3:-verify}" details="${4:-"{}"}" priority="${5:-0}" sound="${6:-pushover}"
-  local ntfy_ok=0 webhook_ok=0 pushover_ok=0
-
-  send_ntfy "$title" "$message" && ntfy_ok=1
-  send_webhook "$title" "$message" "$event" "$details" && webhook_ok=1
-  send_pushover "$title" "$message" "$priority" "$sound" && pushover_ok=1
-
-  # CRITICAL: All channels failed - log prominently
-  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && $pushover_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" || -n "$PUSHOVER_USER" ) ]]; then
-    echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
-    echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
-  fi
-}
-
-# Log rotation
+# Log rotation function
 rotate_log() {
   local log_file="$1"
   local max_size=$((10 * 1024 * 1024))  # 10MB
   [[ ! -f "$log_file" ]] && return 0
   local log_size
-  log_size=$(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file" 2>/dev/null || echo 0)
+  log_size=$(stat -c%s "$log_file" 2>/dev/null || echo 0)
   if [[ "$log_size" -gt "$max_size" ]]; then
     [[ -f "${log_file}.5" ]] && rm -f "${log_file}.5"
     for ((i=4; i>=1; i--)); do
@@ -2011,256 +1328,175 @@ rotate_log() {
   fi
 }
 
-# Format file size for display
-format_size() {
-  local size="$1"
-  numfmt --to=iec-i --suffix=B "$size" 2>/dev/null || echo "${size}B"
-}
-
-# Check if full verification is due
-check_full_verify_due() {
-  if [[ ! -f "$LAST_FULL_VERIFY_FILE" ]]; then
-    echo "never"
-    return 0
-  fi
-
-  local last_verify_epoch current_epoch days_since
-  last_verify_epoch=$(cat "$LAST_FULL_VERIFY_FILE" 2>/dev/null)
-  current_epoch=$(date +%s)
-
-  if [[ -z "$last_verify_epoch" ]] || ! [[ "$last_verify_epoch" =~ ^[0-9]+$ ]]; then
-    echo "never"
-    return 0
-  fi
-
-  days_since=$(( (current_epoch - last_verify_epoch) / 86400 ))
-  echo "$days_since"
-}
-
-# Main
+# Logging with rotation
+LOG="$LOGS_DIR/verify_logfile.log"
 mkdir -p "$LOGS_DIR"
-rotate_log "$LOG_FILE"
+rotate_log "$LOG"
+touch "$LOG" && chmod 600 "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+echo "==== $(date +%F' '%T) START quick verification ===="
 
-log "==== QUICK INTEGRITY CHECK START ===="
-log "Mode: Quick (checksum-only, no download)"
+# Get restic repository password
+RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
+if [[ -z "$RESTIC_PASSWORD" ]]; then
+  echo "$LOG_PREFIX [ERROR] No repository password found"
+  exit 2
+fi
+
+# Get notification credentials
+NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
+NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
+WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
+WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
+PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
+PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
+
+# Notification failure log
+NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+
+# Send notification function
+send_notification() {
+  local title="$1" message="$2" event="${3:-verify}"
+
+  # Send ntfy
+  if [[ -n "$NTFY_URL" ]]; then
+    local attempt=1 max_attempts=3 delay=2 http_code
+    while [[ $attempt -le $max_attempts ]]; do
+      if [[ -n "$NTFY_TOKEN" ]]; then
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" \
+          -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+      else
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -H "Title: $title" -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+      fi
+      [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && break
+      sleep $delay; delay=$((delay * 2)); ((attempt++))
+    done
+  fi
+
+  # Send webhook
+  if [[ -n "$WEBHOOK_URL" ]]; then
+    local timestamp json_payload
+    timestamp="$(date -Iseconds)"
+    json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\"}"
+    local attempt=1 max_attempts=3 delay=2 http_code
+    while [[ $attempt -le $max_attempts ]]; do
+      if [[ -n "$WEBHOOK_TOKEN" ]]; then
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
+      else
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+          -d "$json_payload" 2>/dev/null) || http_code="000"
+      fi
+      [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && break
+      sleep $delay; delay=$((delay * 2)); ((attempt++))
+    done
+  fi
+
+  # Send Pushover
+  if [[ -n "$PUSHOVER_USER" && -n "$PUSHOVER_TOKEN" ]]; then
+    timeout 15 curl -s -o /dev/null \
+      --form-string "token=$PUSHOVER_TOKEN" \
+      --form-string "user=$PUSHOVER_USER" \
+      --form-string "title=$title" \
+      --form-string "message=$message" \
+      https://api.pushover.net/1/messages.json 2>/dev/null || true
+  fi
+}
 
 db_result="SKIPPED"
-db_details=""
 files_result="SKIPPED"
+db_details=""
 files_details=""
 
-# Quick verify ALL database backups (no download) - OPTIMIZED: single API call
+# Verify database repository (quick check)
 if [[ -n "$RCLONE_DB_PATH" ]]; then
-  log "Checking database backups..."
+  REPO="rclone:${RCLONE_REMOTE}:${RCLONE_DB_PATH}"
+  echo "$LOG_PREFIX Checking database repository: $REPO"
 
-  db_total=0
-  db_with_checksum=0
-  db_without_checksum=0
-  db_total_size=0
-
-  # Single API call: get all files with sizes
-  declare -A db_checksum_files=()
-  all_db_files=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_DB_PATH" 2>/dev/null)
-
-  # First pass: build set of checksum files and process backups
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    size=$(echo "$line" | awk '{print $1}')
-    filename=$(echo "$line" | awk '{print $NF}')
-
-    if [[ "$filename" == *.sha256 ]]; then
-      db_checksum_files["$filename"]=1
-    elif [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
-      ((db_total++)) || true
-      db_total_size=$((db_total_size + size))
-    fi
-  done <<< "$all_db_files"
-
-  # Second pass: check which backups have checksums
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    filename=$(echo "$line" | awk '{print $NF}')
-
-    if [[ "$filename" == *-db_backups-*.tar.gz.gpg ]]; then
-      checksum_file="${filename}.sha256"
-      if [[ -n "${db_checksum_files[$checksum_file]:-}" ]]; then
-        ((db_with_checksum++)) || true
-      else
-        ((db_without_checksum++)) || true
-        log "  [WARNING] Missing checksum: $filename"
-      fi
-    fi
-  done <<< "$all_db_files"
-
-  if [[ $db_total -eq 0 ]]; then
-    log "[WARNING] No database backups found"
-    db_result="FAILED"
-    db_details="No backups found"
-  elif [[ $db_without_checksum -gt 0 ]]; then
-    log "Database backups: $db_total total, $db_with_checksum with checksum, $db_without_checksum missing checksum"
-    db_result="WARNING"
-    db_details="$db_total backups ($(format_size "$db_total_size")), $db_without_checksum missing checksums"
-  else
-    log "Database backups: $db_total total, all have checksums, total size: $(format_size "$db_total_size")"
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check 2>&1); then
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
     db_result="PASSED"
-    db_details="$db_total backups ($(format_size "$db_total_size"))"
-  fi
-fi
-
-# Quick verify ALL files backups (no download) - OPTIMIZED: single API call
-if [[ -n "$RCLONE_FILES_PATH" ]]; then
-  log "Checking files backups..."
-
-  files_total=0
-  files_with_checksum=0
-  files_without_checksum=0
-  files_total_size=0
-
-  # Single API call: get all files with sizes
-  declare -A files_checksum_files=()
-  all_files_files=$(rclone lsl "$RCLONE_REMOTE:$RCLONE_FILES_PATH" 2>/dev/null)
-
-  # First pass: build set of checksum files and process backups
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    size=$(echo "$line" | awk '{print $1}')
-    filename=$(echo "$line" | awk '{print $NF}')
-
-    if [[ "$filename" == *.sha256 ]]; then
-      files_checksum_files["$filename"]=1
-    elif [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
-      ((files_total++)) || true
-      files_total_size=$((files_total_size + size))
-    fi
-  done <<< "$all_files_files"
-
-  # Second pass: check which backups have checksums
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    filename=$(echo "$line" | awk '{print $NF}')
-
-    if [[ "$filename" == *.tar.gz ]] && [[ "$filename" != *.sha256 ]]; then
-      checksum_file="${filename}.sha256"
-      if [[ -n "${files_checksum_files[$checksum_file]:-}" ]]; then
-        ((files_with_checksum++)) || true
-      else
-        ((files_without_checksum++)) || true
-        log "  [WARNING] Missing checksum: $filename"
-      fi
-    fi
-  done <<< "$all_files_files"
-
-  if [[ $files_total -eq 0 ]]; then
-    log "[WARNING] No files backups found"
-    files_result="FAILED"
-    files_details="No backups found"
-  elif [[ $files_without_checksum -gt 0 ]]; then
-    log "Files backups: $files_total total, $files_with_checksum with checksum, $files_without_checksum missing checksum"
-    files_result="WARNING"
-    files_details="$files_total backups ($(format_size "$files_total_size")), $files_without_checksum missing checksums"
+    db_details="OK, $snapshot_count snapshot(s)"
+    echo "$LOG_PREFIX   Database: $db_details"
   else
-    log "Files backups: $files_total total, all have checksums, total size: $(format_size "$files_total_size")"
-    files_result="PASSED"
-    files_details="$files_total backups ($(format_size "$files_total_size"))"
+    db_result="FAILED"
+    db_details="Check failed"
+    echo "$LOG_PREFIX   Database: FAILED"
+    echo "$check_output" | head -5
   fi
 fi
 
-# Check if full verification is overdue
-days_since_full=$(check_full_verify_due)
-full_verify_reminder=""
-if [[ "$days_since_full" == "never" ]]; then
-  full_verify_reminder="REMINDER: No full backup test ever performed! Run: sudo backupd -> Verify -> Full test"
-  log "[REMINDER] $full_verify_reminder"
-elif [[ "$days_since_full" -ge "$FULL_VERIFY_INTERVAL_DAYS" ]]; then
-  full_verify_reminder="REMINDER: Last full backup test was $days_since_full days ago. Recommended: Run full test monthly."
-  log "[REMINDER] $full_verify_reminder"
-fi
+# Verify files repository (quick check)
+if [[ -n "$RCLONE_FILES_PATH" ]]; then
+  REPO="rclone:${RCLONE_REMOTE}:${RCLONE_FILES_PATH}"
+  echo "$LOG_PREFIX Checking files repository: $REPO"
 
-# Summary
-log "==== SUMMARY ===="
-log "Database: $db_result ${db_details:+($db_details)}"
-log "Files: $files_result ${files_details:+($files_details)}"
-log "==== QUICK INTEGRITY CHECK END ===="
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check 2>&1); then
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+    files_result="PASSED"
+    files_details="OK, $snapshot_count snapshot(s)"
+    echo "$LOG_PREFIX   Files: $files_details"
+  else
+    files_result="FAILED"
+    files_details="Check failed"
+    echo "$LOG_PREFIX   Files: FAILED"
+    echo "$check_output" | head -5
+  fi
+fi
 
 # Send notification
-notification_body="DB: $db_result, Files: $files_result (Quick check)"
-if [[ -n "$full_verify_reminder" ]]; then
-  notification_body="$notification_body. $full_verify_reminder"
-fi
-
 if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
-  send_notification "Quick Check FAILED on $HOSTNAME" "$notification_body" "verify_failed" "{}" "1" "falling"
+  send_notification "Quick Check FAILED on $HOSTNAME" "DB: $db_result, Files: $files_result" "quick_verify_failed"
+  echo "==== $(date +%F' '%T) END (FAILED) ===="
   exit 1
-elif [[ "$db_result" == "WARNING" || "$files_result" == "WARNING" ]]; then
-  send_notification "Quick Check WARNING on $HOSTNAME" "$notification_body" "verify_warning" "{}" "0" "bike"
-  exit 0
 else
-  # Only notify on success if full verify reminder is needed
-  if [[ -n "$full_verify_reminder" ]]; then
-    send_notification "Quick Check OK - Full Test Needed on $HOSTNAME" "$notification_body" "verify_warning" "{}" "0" "bike"
-  else
-    send_notification "Quick Check PASSED on $HOSTNAME" "$notification_body" "verify_passed" "{}" "0" "magic"
-  fi
+  send_notification "Quick Check PASSED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details)" "quick_verify_passed"
+  echo "==== $(date +%F' '%T) END (success) ===="
 fi
-
-exit 0
 VERIFYEOF
 
-  # Generate crypto functions and inject them
-  local crypto_functions
-  crypto_functions="$(generate_embedded_crypto "$secrets_dir")"
-
-  local crypto_temp
-  crypto_temp="$(mktemp)"
-  echo "$crypto_functions" > "$crypto_temp"
-
-  # Replace placeholders
+  # Replace placeholders in quick verify script
   sed -i \
-    -e "s|%%LOGS_DIR%%|$INSTALL_DIR/logs|g" \
-    -e "s|%%RCLONE_REMOTE%%|$rclone_remote|g" \
-    -e "s|%%RCLONE_DB_PATH%%|$rclone_db_path|g" \
-    -e "s|%%RCLONE_FILES_PATH%%|$rclone_files_path|g" \
-    -e "s|%%SECRETS_DIR%%|$secrets_dir|g" \
+    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
+    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
+    -e "s|%%RCLONE_DB_PATH%%|$RCLONE_DB_PATH|g" \
+    -e "s|%%RCLONE_FILES_PATH%%|$RCLONE_FILES_PATH|g" \
+    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
     "$SCRIPTS_DIR/verify_backup.sh"
 
-  # Replace crypto functions placeholder (multi-line)
-  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/verify_backup.sh"
+  chmod +x "$SCRIPTS_DIR/verify_backup.sh"
 
-  rm -f "$crypto_temp"
-  chmod 700 "$SCRIPTS_DIR/verify_backup.sh"
-}
-
-# ---------- Generate Full Verify REMINDER Script ----------
-# This ONLY sends a reminder notification if full verification is overdue
-# It does NOT download any files - that must be done manually via the menu
-# Runs monthly to remind admins to perform manual backup restoration tests
-
-generate_full_verify_script() {
-  local secrets_dir
-  secrets_dir="$(get_secrets_dir)"
-
+  # ---------- Generate Full Verify Script (for monthly runs) ----------
   cat > "$SCRIPTS_DIR/verify_full_backup.sh" << 'FULLVERIFYEOF'
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
 
 # ============================================================================
-# Backupd - Full Verification REMINDER Script (Monthly)
-# Sends a reminder notification if it's time to do a manual full backup test
-# Does NOT download files - full tests must be run manually via: sudo backupd
+# Backupd v3.0 - Restic Full Verification Script
+# Verifies repository integrity using restic check --read-data
+# Downloads and verifies ALL backup data
+# Recommended: Run monthly via systemd timer
 # ============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
-LOGS_DIR="%%LOGS_DIR%%"
+INSTALL_DIR="/etc/backupd"
+source "$INSTALL_DIR/lib/restic.sh"
+source "$INSTALL_DIR/lib/crypto.sh"
+
 SECRETS_DIR="%%SECRETS_DIR%%"
+RCLONE_REMOTE="%%RCLONE_REMOTE%%"
+RCLONE_DB_PATH="%%RCLONE_DB_PATH%%"
+RCLONE_FILES_PATH="%%RCLONE_FILES_PATH%%"
+LOGS_DIR="%%LOGS_DIR%%"
 HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
-LOG_FILE="$LOGS_DIR/verify_logfile.log"
+LOG_PREFIX="[VERIFY-FULL]"
 
-# Full verification tracking
-LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
-FULL_VERIFY_INTERVAL_DAYS=30
-
+# Secret file names
+SECRET_PASSPHRASE=".c1"
 SECRET_NTFY_TOKEN=".c4"
 SECRET_NTFY_URL=".c5"
 SECRET_WEBHOOK_URL=".c6"
@@ -2268,205 +1504,202 @@ SECRET_WEBHOOK_TOKEN=".c7"
 SECRET_PUSHOVER_USER=".c8"
 SECRET_PUSHOVER_TOKEN=".c9"
 
-%%CRYPTO_FUNCTIONS%%
-
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+# Log rotation function
+rotate_log() {
+  local log_file="$1"
+  local max_size=$((10 * 1024 * 1024))  # 10MB
+  [[ ! -f "$log_file" ]] && return 0
+  local log_size
+  log_size=$(stat -c%s "$log_file" 2>/dev/null || echo 0)
+  if [[ "$log_size" -gt "$max_size" ]]; then
+    [[ -f "${log_file}.5" ]] && rm -f "${log_file}.5"
+    for ((i=4; i>=1; i--)); do
+      [[ -f "${log_file}.${i}" ]] && mv "${log_file}.${i}" "${log_file}.$((i+1))"
+    done
+    mv "$log_file" "${log_file}.1"
+  fi
 }
 
-# Notification functions
-NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" 2>/dev/null || echo "")"
-NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" 2>/dev/null || echo "")"
-WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" 2>/dev/null || echo "")"
-WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" 2>/dev/null || echo "")"
-PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" 2>/dev/null || echo "")"
-PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" 2>/dev/null || echo "")"
+# Logging with rotation
+LOG="$LOGS_DIR/verify_full_logfile.log"
+mkdir -p "$LOGS_DIR"
+rotate_log "$LOG"
+touch "$LOG" && chmod 600 "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+echo "==== $(date +%F' '%T) START full verification ===="
+
+# Get restic repository password
+RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
+if [[ -z "$RESTIC_PASSWORD" ]]; then
+  echo "$LOG_PREFIX [ERROR] No repository password found"
+  exit 2
+fi
+
+# Get notification credentials
+NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
+NTFY_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_TOKEN" || echo "")"
+WEBHOOK_URL="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_URL" || echo "")"
+WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
+PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
+PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
 
 # Notification failure log
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
 
-# Robust ntfy sender with retry (3 attempts, exponential backoff)
-send_ntfy() {
-  local title="$1" message="$2" priority="${3:-default}"
-  [[ -z "$NTFY_URL" ]] && return 0
+# Send notification function
+send_notification() {
+  local title="$1" message="$2" event="${3:-verify}" priority="${4:-0}"
 
-  local attempt=1 max_attempts=3 delay=2 http_code
-  while [[ $attempt -le $max_attempts ]]; do
-    if [[ -n "$NTFY_TOKEN" ]]; then
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" -H "Priority: $priority" \
-        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
-    else
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -H "Title: $title" -H "Priority: $priority" \
-        -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
-    fi
+  # Send ntfy
+  if [[ -n "$NTFY_URL" ]]; then
+    local attempt=1 max_attempts=3 delay=2 http_code
+    while [[ $attempt -le $max_attempts ]]; do
+      if [[ -n "$NTFY_TOKEN" ]]; then
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $NTFY_TOKEN" -H "Title: $title" \
+          -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+      else
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -H "Title: $title" -d "$message" "$NTFY_URL" 2>/dev/null) || http_code="000"
+      fi
+      [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && break
+      sleep $delay; delay=$((delay * 2)); ((attempt++))
+    done
+  fi
 
-    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
+  # Send webhook
+  if [[ -n "$WEBHOOK_URL" ]]; then
+    local timestamp json_payload
+    timestamp="$(date -Iseconds)"
+    json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\"}"
+    local attempt=1 max_attempts=3 delay=2 http_code
+    while [[ $attempt -le $max_attempts ]]; do
+      if [[ -n "$WEBHOOK_TOKEN" ]]; then
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
+      else
+        http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
+          -d "$json_payload" 2>/dev/null) || http_code="000"
+      fi
+      [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && break
+      sleep $delay; delay=$((delay * 2)); ((attempt++))
+    done
+  fi
 
-    if [[ $attempt -lt $max_attempts ]]; then
-      sleep $delay
-      delay=$((delay * 2))
-    fi
-    ((attempt++))
-  done
-
-  echo "[$(date -Iseconds)] NTFY FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
-  return 1
-}
-
-# Robust webhook sender with retry (3 attempts, exponential backoff)
-send_webhook() {
-  local title="$1" message="$2" event="${3:-verify_reminder}" details="${4:-"{}"}"
-  [[ -z "$WEBHOOK_URL" ]] && return 0
-
-  local timestamp json_payload http_code
-  timestamp="$(date -Iseconds)"
-  json_payload="{\"event\":\"$event\",\"title\":\"$title\",\"hostname\":\"$HOSTNAME\",\"message\":\"$message\",\"timestamp\":\"$timestamp\",\"details\":$details}"
-
-  local attempt=1 max_attempts=3 delay=2
-  while [[ $attempt -le $max_attempts ]]; do
-    if [[ -n "$WEBHOOK_TOKEN" ]]; then
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $WEBHOOK_TOKEN" -d "$json_payload" 2>/dev/null) || http_code="000"
-    else
-      http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
-        -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
-        -d "$json_payload" 2>/dev/null) || http_code="000"
-    fi
-
-    [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && return 0
-
-    if [[ $attempt -lt $max_attempts ]]; then
-      sleep $delay
-      delay=$((delay * 2))
-    fi
-    ((attempt++))
-  done
-
-  echo "[$(date -Iseconds)] WEBHOOK FAILED: event='$event' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
-  return 1
-}
-
-# Robust Pushover sender with retry (3 attempts, exponential backoff)
-send_pushover() {
-  local title="$1" message="$2" priority="${3:-0}" sound="${4:-pushover}"
-  [[ -z "$PUSHOVER_USER" || -z "$PUSHOVER_TOKEN" ]] && return 0
-
-  local attempt=1 max_attempts=3 delay=2 http_code
-  while [[ $attempt -le $max_attempts ]]; do
-    http_code=$(timeout 15 curl -s -o /dev/null -w "%{http_code}" \
+  # Send Pushover (with priority support for failures)
+  if [[ -n "$PUSHOVER_USER" && -n "$PUSHOVER_TOKEN" ]]; then
+    timeout 15 curl -s -o /dev/null \
       --form-string "token=$PUSHOVER_TOKEN" \
       --form-string "user=$PUSHOVER_USER" \
       --form-string "title=$title" \
       --form-string "message=$message" \
       --form-string "priority=$priority" \
-      --form-string "sound=$sound" \
-      https://api.pushover.net/1/messages.json 2>/dev/null) || http_code="000"
-
-    [[ "$http_code" == "200" ]] && return 0
-
-    if [[ $attempt -lt $max_attempts ]]; then
-      sleep $delay
-      delay=$((delay * 2))
-    fi
-    ((attempt++))
-  done
-
-  echo "[$(date -Iseconds)] PUSHOVER FAILED: title='$title' http=$http_code attempts=$max_attempts" >> "$NOTIFICATION_FAIL_LOG"
-  return 1
-}
-
-# Send to all channels, track failures
-send_notification() {
-  local title="$1" message="$2" priority="${3:-default}" event="${4:-verify_reminder}"
-  local ntfy_ok=0 webhook_ok=0 pushover_ok=0
-
-  # Map priority for Pushover (-1=low, 0=normal, 1=high)
-  local pushover_priority=0
-  [[ "$priority" == "high" ]] && pushover_priority=1
-  [[ "$priority" == "low" ]] && pushover_priority=-1
-
-  send_ntfy "$title" "$message" "$priority" && ntfy_ok=1
-  send_webhook "$title" "$message" "$event" && webhook_ok=1
-  send_pushover "$title" "$message" "$pushover_priority" "siren" && pushover_ok=1
-
-  # CRITICAL: All channels failed - log prominently
-  if [[ $ntfy_ok -eq 0 && $webhook_ok -eq 0 && $pushover_ok -eq 0 && ( -n "$NTFY_URL" || -n "$WEBHOOK_URL" || -n "$PUSHOVER_USER" ) ]]; then
-    echo "[CRITICAL] ALL NOTIFICATION CHANNELS FAILED for: $title" >&2
-    echo "[$(date -Iseconds)] CRITICAL: ALL CHANNELS FAILED - title='$title' event='$event'" >> "$NOTIFICATION_FAIL_LOG"
+      https://api.pushover.net/1/messages.json 2>/dev/null || true
   fi
 }
 
-# Check when last full verification was done
-check_full_verify_due() {
-  if [[ ! -f "$LAST_FULL_VERIFY_FILE" ]]; then
-    echo "never"
-    return 0
+db_result="SKIPPED"
+files_result="SKIPPED"
+db_details=""
+files_details=""
+total_duration=0
+
+# Full verify database repository (downloads all data)
+if [[ -n "$RCLONE_DB_PATH" ]]; then
+  REPO="rclone:${RCLONE_REMOTE}:${RCLONE_DB_PATH}"
+  echo "$LOG_PREFIX Full verification: Database repository"
+  echo "$LOG_PREFIX   Repository: $REPO"
+  echo "$LOG_PREFIX   This will download and verify all data..."
+
+  start_time=$(date +%s)
+
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --read-data 2>&1); then
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+    total_duration=$((total_duration + duration))
+
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag database --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+    repo_stats=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$repo" stats --json 2>/dev/null || echo "{}")
+    total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+    total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
+
+    db_result="PASSED"
+    db_details="$snapshot_count snapshots, $total_size_human verified in ${duration}s"
+    echo "$LOG_PREFIX   Database: PASSED ($db_details)"
+  else
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+    total_duration=$((total_duration + duration))
+
+    db_result="FAILED"
+    db_details="Verification failed after ${duration}s"
+    echo "$LOG_PREFIX   Database: FAILED"
+    echo "$check_output" | head -10
   fi
-
-  local last_verify_epoch current_epoch days_since
-  last_verify_epoch=$(cat "$LAST_FULL_VERIFY_FILE" 2>/dev/null)
-  current_epoch=$(date +%s)
-
-  if [[ -z "$last_verify_epoch" ]] || ! [[ "$last_verify_epoch" =~ ^[0-9]+$ ]]; then
-    echo "never"
-    return 0
-  fi
-
-  days_since=$(( (current_epoch - last_verify_epoch) / 86400 ))
-  echo "$days_since"
-}
-
-# Main
-mkdir -p "$LOGS_DIR"
-
-log "==== FULL VERIFICATION REMINDER CHECK ===="
-
-days_since=$(check_full_verify_due)
-
-if [[ "$days_since" == "never" ]]; then
-  log "[WARNING] No full backup test has EVER been performed!"
-  log "Action required: Run 'sudo backupd' -> Verify -> Full test"
-  send_notification \
-    "BACKUP TEST REQUIRED on $HOSTNAME" \
-    "You have NEVER tested if your backups are restorable! Run: sudo backupd -> Verify -> Full test (downloads and decrypts backup to verify)" \
-    "high"
-elif [[ "$days_since" -ge "$FULL_VERIFY_INTERVAL_DAYS" ]]; then
-  log "[WARNING] Last full backup test was $days_since days ago (threshold: $FULL_VERIFY_INTERVAL_DAYS days)"
-  log "Action required: Run 'sudo backupd' -> Verify -> Full test"
-  send_notification \
-    "BACKUP TEST OVERDUE on $HOSTNAME" \
-    "Last full backup test was $days_since days ago. Run: sudo backupd -> Verify -> Full test (downloads and decrypts backup to verify)" \
-    "high"
-else
-  log "Last full backup test was $days_since days ago - OK (threshold: $FULL_VERIFY_INTERVAL_DAYS days)"
-  # No notification needed - everything is fine
 fi
 
-log "==== REMINDER CHECK END ===="
+# Full verify files repository (downloads all data)
+if [[ -n "$RCLONE_FILES_PATH" ]]; then
+  REPO="rclone:${RCLONE_REMOTE}:${RCLONE_FILES_PATH}"
+  echo "$LOG_PREFIX Full verification: Files repository"
+  echo "$LOG_PREFIX   Repository: $REPO"
+  echo "$LOG_PREFIX   This will download and verify all data..."
 
-exit 0
+  start_time=$(date +%s)
+
+  if check_output=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" check --read-data 2>&1); then
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+    total_duration=$((total_duration + duration))
+
+    snapshot_count=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" snapshots --tag files --json 2>/dev/null | grep -c '"short_id"' || echo "0")
+    repo_stats=$(RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" stats --json 2>/dev/null || echo "{}")
+    total_size=$(echo "$repo_stats" | grep -o '"total_size":[0-9]*' | cut -d':' -f2)
+    total_size_human=$(numfmt --to=iec-i --suffix=B "$total_size" 2>/dev/null || echo "${total_size:-0}B")
+
+    files_result="PASSED"
+    files_details="$snapshot_count snapshots, $total_size_human verified in ${duration}s"
+    echo "$LOG_PREFIX   Files: PASSED ($files_details)"
+  else
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+    total_duration=$((total_duration + duration))
+
+    files_result="FAILED"
+    files_details="Verification failed after ${duration}s"
+    echo "$LOG_PREFIX   Files: FAILED"
+    echo "$check_output" | head -10
+  fi
+fi
+
+# Update full verification timestamp
+LAST_FULL_VERIFY_FILE="$INSTALL_DIR/.last_full_verify"
+if [[ "$db_result" == "PASSED" || "$files_result" == "PASSED" ]]; then
+  date +%s > "$LAST_FULL_VERIFY_FILE"
+  chmod 600 "$LAST_FULL_VERIFY_FILE" 2>/dev/null
+fi
+
+# Send notification
+if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
+  send_notification "Full Verification FAILED on $HOSTNAME" "DB: $db_result, Files: $files_result. Total time: ${total_duration}s" "full_verify_failed" "1"
+  echo "==== $(date +%F' '%T) END (FAILED, ${total_duration}s total) ===="
+  exit 1
+else
+  send_notification "Full Verification PASSED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details). Total: ${total_duration}s" "full_verify_passed" "0"
+  echo "==== $(date +%F' '%T) END (success, ${total_duration}s total) ===="
+fi
 FULLVERIFYEOF
 
-  # Generate crypto functions and inject them
-  local crypto_functions
-  crypto_functions="$(generate_embedded_crypto "$secrets_dir")"
-
-  local crypto_temp
-  crypto_temp="$(mktemp)"
-  echo "$crypto_functions" > "$crypto_temp"
-
-  # Replace placeholders
+  # Replace placeholders in full verify script
   sed -i \
-    -e "s|%%LOGS_DIR%%|$INSTALL_DIR/logs|g" \
-    -e "s|%%SECRETS_DIR%%|$secrets_dir|g" \
+    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
+    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
+    -e "s|%%RCLONE_DB_PATH%%|$RCLONE_DB_PATH|g" \
+    -e "s|%%RCLONE_FILES_PATH%%|$RCLONE_FILES_PATH|g" \
+    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
     "$SCRIPTS_DIR/verify_full_backup.sh"
 
-  # Replace crypto functions placeholder (multi-line)
-  sed -i -e "/%%CRYPTO_FUNCTIONS%%/{r $crypto_temp" -e "d}" "$SCRIPTS_DIR/verify_full_backup.sh"
-
-  rm -f "$crypto_temp"
-  chmod 700 "$SCRIPTS_DIR/verify_full_backup.sh"
+  chmod +x "$SCRIPTS_DIR/verify_full_backup.sh"
 }

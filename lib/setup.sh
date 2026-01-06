@@ -207,20 +207,16 @@ run_setup() {
     echo
   fi
 
-  # ---------- Step 2: Encryption Password ----------
-  echo "Step 2: Encryption Password"
+  # ---------- Step 2: Repository Password ----------
+  echo "Step 2: Repository Password"
   echo "---------------------------"
-  if argon2_available; then
-    echo "Your backups will be encrypted with AES-256 + Argon2id key derivation."
-  else
-    echo "Your backups will be encrypted with AES-256 + PBKDF2 key derivation."
-    print_info "Install 'argon2' package for stronger Argon2id encryption."
-  fi
+  echo "This password protects your backup repository."
+  echo "It is used by restic to encrypt all backup data."
   echo
   show_password_requirements
-  read -sp "Enter encryption password: " ENCRYPTION_PASSWORD
+  read -sp "Enter repository password: " ENCRYPTION_PASSWORD
   echo
-  read -sp "Confirm encryption password: " ENCRYPTION_PASSWORD_CONFIRM
+  read -sp "Confirm repository password: " ENCRYPTION_PASSWORD_CONFIRM
   echo
 
   if [[ "$ENCRYPTION_PASSWORD" != "$ENCRYPTION_PASSWORD_CONFIRM" ]]; then
@@ -235,7 +231,7 @@ run_setup() {
   fi
 
   store_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE" "$ENCRYPTION_PASSWORD"
-  print_success "Encryption password stored securely."
+  print_success "Repository password stored securely."
   echo
 
   # ---------- Step 3: Database Authentication (if enabled) ----------
@@ -414,53 +410,79 @@ run_setup() {
   # ---------- Step 6: Retention Policy ----------
   echo "Step 6: Retention Policy"
   echo "------------------------"
-  echo "How long should backups be kept before automatic cleanup?"
+  echo "How long should backups be kept?"
   echo
-  echo "  1) 1 minute (TESTING ONLY)"
-  echo "  2) 1 hour (TESTING)"
-  echo "  3) 7 days"
-  echo "  4) 14 days"
-  echo "  5) 30 days"
-  echo "  6) 60 days"
-  echo "  7) 90 days"
-  echo "  8) 365 days (1 year)"
-  echo "  9) No automatic cleanup"
+  echo "  1) 7 days"
+  echo "  2) 14 days"
+  echo "  3) 30 days (recommended)"
+  echo "  4) 60 days"
+  echo "  5) 90 days"
+  echo "  6) 365 days (1 year)"
   echo
-  read -p "Select retention period [1-9] (default: 5): " RETENTION_CHOICE
-  RETENTION_CHOICE=${RETENTION_CHOICE:-5}
+  read -p "Select retention period [1-6] (default: 3): " RETENTION_CHOICE
+  RETENTION_CHOICE=${RETENTION_CHOICE:-3}
 
-  local RETENTION_MINUTES=0
+  local RETENTION_DAYS=30
   local RETENTION_DESC=""
   case "$RETENTION_CHOICE" in
-    1) RETENTION_MINUTES=1; RETENTION_DESC="1 minute (TESTING)" ;;
-    2) RETENTION_MINUTES=60; RETENTION_DESC="1 hour (TESTING)" ;;
-    3) RETENTION_MINUTES=$((7 * 24 * 60)); RETENTION_DESC="7 days" ;;
-    4) RETENTION_MINUTES=$((14 * 24 * 60)); RETENTION_DESC="14 days" ;;
-    5) RETENTION_MINUTES=$((30 * 24 * 60)); RETENTION_DESC="30 days" ;;
-    6) RETENTION_MINUTES=$((60 * 24 * 60)); RETENTION_DESC="60 days" ;;
-    7) RETENTION_MINUTES=$((90 * 24 * 60)); RETENTION_DESC="90 days" ;;
-    8) RETENTION_MINUTES=$((365 * 24 * 60)); RETENTION_DESC="365 days" ;;
-    9) RETENTION_MINUTES=0; RETENTION_DESC="No automatic cleanup" ;;
-    *) RETENTION_MINUTES=$((30 * 24 * 60)); RETENTION_DESC="30 days (default)" ;;
+    1) RETENTION_DAYS=7; RETENTION_DESC="7 days" ;;
+    2) RETENTION_DAYS=14; RETENTION_DESC="14 days" ;;
+    3) RETENTION_DAYS=30; RETENTION_DESC="30 days" ;;
+    4) RETENTION_DAYS=60; RETENTION_DESC="60 days" ;;
+    5) RETENTION_DAYS=90; RETENTION_DESC="90 days" ;;
+    6) RETENTION_DAYS=365; RETENTION_DESC="365 days (1 year)" ;;
+    *) RETENTION_DAYS=30; RETENTION_DESC="30 days (default)" ;;
   esac
 
-  save_config "RETENTION_MINUTES" "$RETENTION_MINUTES"
+  save_config "RETENTION_DAYS" "$RETENTION_DAYS"
   save_config "RETENTION_DESC" "$RETENTION_DESC"
   print_success "Retention policy: $RETENTION_DESC"
   echo
 
-  # ---------- Step 7: Generate Scripts ----------
-  echo "Step 7: Generating Backup Scripts"
+  # ---------- Step 7: Initialize Restic Repositories ----------
+  echo "Step 7: Initializing Restic Repositories"
+  echo "-----------------------------------------"
+
+  local db_repo files_repo
+  if [[ "$DO_DATABASE" == "true" && -n "$RCLONE_DB_PATH" ]]; then
+    db_repo="rclone:${RCLONE_REMOTE}:${RCLONE_DB_PATH}"
+    echo "Initializing database repository..."
+    if repo_exists "$db_repo" "$ENCRYPTION_PASSWORD" 2>/dev/null; then
+      print_info "Database repository already exists"
+    elif init_restic_repo "$db_repo" "$ENCRYPTION_PASSWORD"; then
+      print_success "Database repository initialized: $db_repo"
+    else
+      print_error "Failed to initialize database repository"
+      print_info "Will attempt initialization on first backup"
+    fi
+  fi
+
+  if [[ "$DO_FILES" == "true" && -n "$RCLONE_FILES_PATH" ]]; then
+    files_repo="rclone:${RCLONE_REMOTE}:${RCLONE_FILES_PATH}"
+    echo "Initializing files repository..."
+    if repo_exists "$files_repo" "$ENCRYPTION_PASSWORD" 2>/dev/null; then
+      print_info "Files repository already exists"
+    elif init_restic_repo "$files_repo" "$ENCRYPTION_PASSWORD"; then
+      print_success "Files repository initialized: $files_repo"
+    else
+      print_error "Failed to initialize files repository"
+      print_info "Will attempt initialization on first backup"
+    fi
+  fi
+  echo
+
+  # ---------- Step 8: Generate Scripts ----------
+  echo "Step 8: Generating Backup Scripts"
   echo "----------------------------------"
 
   generate_all_scripts "$SECRETS_DIR" "$DO_DATABASE" "$DO_FILES" "$RCLONE_REMOTE" \
-    "${RCLONE_DB_PATH:-}" "${RCLONE_FILES_PATH:-}" "$RETENTION_MINUTES" \
+    "${RCLONE_DB_PATH:-}" "${RCLONE_FILES_PATH:-}" "$RETENTION_DAYS" \
     "${WEB_PATH_PATTERN:-/var/www/*}" "${WEBROOT_SUBDIR:-.}"
 
   echo
 
-  # ---------- Step 8: Schedule Backups ----------
-  echo "Step 8: Schedule Backups (systemd timers)"
+  # ---------- Step 9: Schedule Backups ----------
+  echo "Step 9: Schedule Backups (systemd timers)"
   echo "------------------------------------------"
 
   if [[ "$DO_DATABASE" == "true" ]]; then
@@ -481,10 +503,10 @@ run_setup() {
     fi
   fi
 
-  # ---------- Step 9: Enable Verification Timers ----------
+  # ---------- Step 10: Enable Verification Timers ----------
   echo
-  echo "Step 9: Backup Verification (recommended)"
-  echo "------------------------------------------"
+  echo "Step 10: Backup Verification (recommended)"
+  echo "-------------------------------------------"
   echo
   echo "Backupd can automatically verify your backups to ensure they're restorable."
   echo
@@ -570,8 +592,8 @@ EOF
   print_success "Monthly full verification enabled (1st of month at 3 AM)"
 
   echo
-  print_info "Quick check: Verifies backups exist (no download)"
-  print_info "Full check: Downloads and tests decryption monthly"
+  print_info "Quick check: Verifies repository integrity (metadata only)"
+  print_info "Full check: Downloads and verifies backup data monthly"
   echo
   print_info "Manage via: sudo backupd → Manage schedules"
 

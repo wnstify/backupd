@@ -172,7 +172,7 @@ debug_log_system_info() {
     echo "openssl: $(openssl version 2>/dev/null | head -1 || echo 'not found')"
     echo "gpg: $(gpg --version 2>/dev/null | head -1 || echo 'not found')"
     echo "rclone: $(rclone version 2>/dev/null | head -1 || echo 'not found')"
-    echo "pigz: $(pigz --version 2>/dev/null 2>&1 | head -1 || echo 'not found')"
+    echo "restic: $(restic version 2>/dev/null | head -1 || echo 'not found')"
     echo "argon2: $(command -v argon2 &>/dev/null && echo 'installed' || echo 'not found')"
     echo "tar: $(tar --version 2>/dev/null | head -1 || echo 'not found')"
     echo "systemctl: $(command -v systemctl &>/dev/null && echo 'installed' || echo 'not found')"

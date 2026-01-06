@@ -88,17 +88,17 @@ show_status() {
   # Retention policy
   echo
   echo "Retention Policy:"
-  local retention_desc retention_minutes
+  local retention_desc retention_days
   retention_desc="$(get_config_value 'RETENTION_DESC')"
-  retention_minutes="$(get_config_value 'RETENTION_MINUTES')"
+  retention_days="$(get_config_value 'RETENTION_DAYS')"
   if [[ -n "$retention_desc" ]]; then
-    if [[ "$retention_minutes" -eq 0 ]]; then
+    if [[ -z "$retention_days" ]] || [[ "$retention_days" -eq 0 ]]; then
       print_warning "Retention: $retention_desc"
     else
       print_success "Retention: $retention_desc"
     fi
   else
-    print_warning "Retention: NOT CONFIGURED (no automatic cleanup)"
+    print_warning "Retention: NOT CONFIGURED"
   fi
 
   # Check rclone

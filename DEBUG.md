@@ -103,7 +103,7 @@ sudo backupd --log-file /tmp/debug.log backup db
 **DEBUG (--verbose):**
 - Everything in INFO, plus:
 - System information (OS, kernel, bash version)
-- Tool versions (openssl, rclone, gpg, etc.)
+- Tool versions (openssl, restic, rclone, etc.)
 - Configuration keys (no values)
 - Command execution details
 
@@ -175,9 +175,8 @@ Bash: 5.2.21(1)-release
 User: root (EUID: 0)
 --- Tool Versions ---
 openssl: OpenSSL 3.0.13
-gpg: gpg (GnuPG) 2.4.4
+restic: restic 0.17.3
 rclone: rclone v1.65.0
-pigz: pigz 2.8
 argon2: installed
 tar: tar (GNU tar) 1.35
 curl: curl 8.5.0
@@ -286,8 +285,8 @@ Bash: 5.2.21(1)-release
 Backupd: 2.2.11
 
 openssl: OpenSSL 3.0.13
+restic: restic 0.17.3
 rclone: rclone v1.65.0
-gpg: gpg (GnuPG) 2.4.4
 ```
 
 ## Log Entries
