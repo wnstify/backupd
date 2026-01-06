@@ -149,7 +149,7 @@ verify_full() {
     local start_time check_output
     start_time=$(date +%s)
 
-    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --read-data 2>&1); then
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --read-data --retry-lock 2m 2>&1); then
       local end_time duration
       end_time=$(date +%s)
       duration=$((end_time - start_time))
@@ -195,7 +195,7 @@ verify_full() {
     local start_time check_output
     start_time=$(date +%s)
 
-    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --read-data 2>&1); then
+    if check_output=$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" check --read-data --retry-lock 2m 2>&1); then
       local end_time duration
       end_time=$(date +%s)
       duration=$((end_time - start_time))

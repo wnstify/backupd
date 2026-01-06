@@ -177,8 +177,9 @@ WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
 PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
 
-# Notification failure log
+# Notification failure log (ensure it exists with secure permissions)
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+touch "$NOTIFICATION_FAIL_LOG" 2>/dev/null && chmod 600 "$NOTIFICATION_FAIL_LOG" 2>/dev/null || true
 
 # Robust ntfy sender with retry (3 attempts, exponential backoff)
 send_ntfy() {
@@ -545,8 +546,9 @@ WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
 PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
 
-# Notification failure log
+# Notification failure log (ensure it exists with secure permissions)
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+touch "$NOTIFICATION_FAIL_LOG" 2>/dev/null && chmod 600 "$NOTIFICATION_FAIL_LOG" 2>/dev/null || true
 
 # Robust ntfy sender with retry (3 attempts, exponential backoff)
 send_ntfy() {
@@ -1404,8 +1406,9 @@ WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
 PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
 
-# Notification failure log
+# Notification failure log (ensure it exists with secure permissions)
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+touch "$NOTIFICATION_FAIL_LOG" 2>/dev/null && chmod 600 "$NOTIFICATION_FAIL_LOG" 2>/dev/null || true
 
 # Send notification function
 send_notification() {
@@ -1602,8 +1605,9 @@ WEBHOOK_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_WEBHOOK_TOKEN" || echo "")"
 PUSHOVER_USER="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_USER" || echo "")"
 PUSHOVER_TOKEN="$(get_secret "$SECRETS_DIR" "$SECRET_PUSHOVER_TOKEN" || echo "")"
 
-# Notification failure log
+# Notification failure log (ensure it exists with secure permissions)
 NOTIFICATION_FAIL_LOG="$LOGS_DIR/notification_failures.log"
+touch "$NOTIFICATION_FAIL_LOG" 2>/dev/null && chmod 600 "$NOTIFICATION_FAIL_LOG" 2>/dev/null || true
 
 # Send notification function
 send_notification() {

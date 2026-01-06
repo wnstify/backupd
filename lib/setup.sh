@@ -40,6 +40,13 @@ run_setup() {
   mkdir -p "$INSTALL_DIR" "$SCRIPTS_DIR" "$INSTALL_DIR/logs"
   chmod 700 "$INSTALL_DIR" "$SCRIPTS_DIR"
 
+  # Pre-create log files with secure permissions
+  touch "$INSTALL_DIR/logs/db_logfile.log" 2>/dev/null || true
+  touch "$INSTALL_DIR/logs/files_logfile.log" 2>/dev/null || true
+  touch "$INSTALL_DIR/logs/verify_logfile.log" 2>/dev/null || true
+  touch "$INSTALL_DIR/logs/notification_failures.log" 2>/dev/null || true
+  chmod 600 "$INSTALL_DIR/logs/"*.log 2>/dev/null || true
+
   # Initialize secure storage
   local SECRETS_DIR
   SECRETS_DIR="$(init_secure_storage)"
