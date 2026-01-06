@@ -142,6 +142,8 @@ check_for_updates_silent() {
 
 # Show update banner if available
 show_update_banner() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "show_update_banner" 2>/dev/null || true
   # Skip update banner for non-main branch installations
   local installed_branch
   installed_branch=$(get_installed_branch 2>/dev/null || echo "main")
@@ -234,6 +236,8 @@ download_update() {
 
 # Backup current installation
 backup_current_version() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "backup_current_version" 2>/dev/null || true
   local backup_dir="${SCRIPT_DIR}.backup"
 
   # Remove old backup if exists
@@ -247,6 +251,9 @@ backup_current_version() {
 
 # Restore from backup (rollback)
 rollback_update() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "rollback_update" 2>/dev/null || true
+  log_warn "Rolling back update"
   local backup_dir="${SCRIPT_DIR}.backup"
 
   if [[ ! -d "$backup_dir" ]]; then
@@ -267,6 +274,8 @@ rollback_update() {
 
 # Apply update
 apply_update() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "apply_update" 2>/dev/null || true
   local temp_dir="$1"
 
   print_info "Applying update..."
@@ -342,6 +351,9 @@ get_installed_branch() {
 
 # Perform the update
 do_update() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "do_update" 2>/dev/null || true
+  log_info "Starting update process"
   print_header
   echo "Update Backupd"
   echo "=============="
@@ -464,6 +476,8 @@ do_update() {
 
 # Check for updates (verbose, for menu)
 check_for_updates_verbose() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "check_for_updates_verbose" 2>/dev/null || true
   print_header
   echo "Check for Updates"
   echo "================="
@@ -525,6 +539,9 @@ download_from_branch() {
 
 # Update from development branch (bypasses release system)
 do_dev_update() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "do_dev_update" "$@" 2>/dev/null || true
+  log_info "Starting development branch update"
   local branch="${1:-develop}"
 
   print_header

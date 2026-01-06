@@ -157,6 +157,8 @@ show_status() {
 # ---------- View Logs ----------
 
 view_logs() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "view_logs" 2>/dev/null || true
   while true; do
     print_header
     echo "View Logs"
@@ -306,6 +308,8 @@ view_logs() {
 # ---------- Clear Old Logs ----------
 
 clear_old_logs() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "clear_old_logs" 2>/dev/null || true
   echo
   echo "Clear Old Logs"
   echo "=============="

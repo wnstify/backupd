@@ -114,6 +114,8 @@ show_notification_status_brief() {
 # ---------- Configure ntfy ----------
 
 configure_ntfy() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "configure_ntfy" 2>/dev/null || true
   print_header
   echo "Configure ntfy Notifications"
   echo "============================"
@@ -186,6 +188,8 @@ configure_ntfy() {
 # ---------- Configure Webhook ----------
 
 configure_webhook() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "configure_webhook" 2>/dev/null || true
   print_header
   echo "Configure Webhook Notifications"
   echo "================================"
@@ -259,6 +263,8 @@ configure_webhook() {
 # ---------- Configure Pushover ----------
 
 configure_pushover() {
+  log_func_enter 2>/dev/null || true
+  debug_enter "configure_pushover" 2>/dev/null || true
   print_header
   echo "Configure Pushover Notifications"
   echo "================================="

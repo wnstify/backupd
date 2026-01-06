@@ -72,6 +72,9 @@ source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
+# Initialize structured logging (writes to /var/log/backupd.log)
+log_init "db_backup"
+
 SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
 RCLONE_PATH="%%RCLONE_PATH%%"
@@ -133,6 +136,7 @@ cleanup() {
     write_progress "error" 0 "Backup failed (exit code: $exit_code)" "failed"
   fi
   [[ -n "$MYSQL_AUTH_FILE" && -f "$MYSQL_AUTH_FILE" ]] && rm -f "$MYSQL_AUTH_FILE"
+  log_end 2>/dev/null || true
   exit $exit_code
 }
 trap cleanup EXIT INT TERM
@@ -140,7 +144,7 @@ trap cleanup EXIT INT TERM
 # Acquire lock (fixed location so it works across runs)
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "$LOG_PREFIX Another database backup is running. Exiting."
+  log_info "Another database backup is running. Exiting."
   exit 0
 fi
 
@@ -171,7 +175,7 @@ write_progress "starting" 5 "Checking prerequisites"
 
 # Get restic repository password from secrets
 RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
-[[ -z "$RESTIC_PASSWORD" ]] && { echo "$LOG_PREFIX [ERROR] No repository password found"; exit 2; }
+[[ -z "$RESTIC_PASSWORD" ]] && { log_error "No repository password found"; exit 2; }
 
 # Get notification credentials
 NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
@@ -302,13 +306,13 @@ echo "$LOG_PREFIX Repository: $REPO"
 # Initialize repo if needed
 write_progress "initializing" 10 "Checking repository"
 if ! repo_exists "$REPO" "$RESTIC_PASSWORD"; then
-  echo "$LOG_PREFIX Initializing restic repository..."
+  log_info "Initializing restic repository..."
   if ! init_restic_repo "$REPO" "$RESTIC_PASSWORD"; then
-    echo "$LOG_PREFIX [ERROR] Failed to initialize repository"
+    log_error "Failed to initialize repository"
     send_notification "DB Backup Failed on $HOSTNAME" "Repository initialization failed" "backup_failed" "{}" "1" "siren"
     exit 3
   fi
-  echo "$LOG_PREFIX Repository initialized"
+  log_info "Repository initialized"
 fi
 
 # Detect DB client
@@ -317,7 +321,7 @@ if command -v mariadb >/dev/null 2>&1; then
 elif command -v mysql >/dev/null 2>&1; then
   DB_CLIENT="mysql"; DB_DUMP="mysqldump"
 else
-  echo "$LOG_PREFIX [ERROR] No database client found"
+  log_error "No database client found"
   send_notification "DB Backup Failed on $HOSTNAME" "No database client found" "backup_failed" "{}" "1" "siren"
   exit 5
 fi
@@ -344,7 +348,7 @@ EXCLUDE_REGEX='^(information_schema|performance_schema|sys|mysql)$'
 DBS="$($DB_CLIENT "${MYSQL_ARGS[@]}" -NBe 'SHOW DATABASES' 2>/dev/null | grep -Ev "$EXCLUDE_REGEX" || true)"
 
 if [[ -z "$DBS" ]]; then
-  echo "$LOG_PREFIX [ERROR] No databases found or cannot connect to database"
+  log_error "No databases found or cannot connect to database"
   send_notification "DB Backup Failed on $HOSTNAME" "No databases found" "backup_failed" "{}" "1" "siren"
   exit 6
 fi
@@ -379,7 +383,7 @@ for db in $DBS; do
 done
 
 if [[ $db_count -eq 0 ]]; then
-  echo "$LOG_PREFIX [ERROR] All database backups failed"
+  log_error "All database backups failed"
   send_notification "DB Backup Failed on $HOSTNAME" "All backups failed" "backup_failed" "{}" "1" "siren"
   exit 7
 fi
@@ -449,6 +453,9 @@ source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
+# Initialize structured logging (writes to /var/log/backupd.log)
+log_init "files_backup"
+
 SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
 RCLONE_PATH="%%RCLONE_PATH%%"
@@ -508,6 +515,7 @@ cleanup() {
   if [[ $exit_code -ne 0 && -f "$PROGRESS_FILE" ]]; then
     write_progress "error" 0 "Backup failed (exit code: $exit_code)" "failed"
   fi
+  log_end 2>/dev/null || true
   exit $exit_code
 }
 trap cleanup EXIT INT TERM
@@ -515,7 +523,7 @@ trap cleanup EXIT INT TERM
 # Acquire lock (fixed location)
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "\$LOG_PREFIX Another files backup is running. Exiting."
+  log_info "Another files backup is running. Exiting."
   exit 0
 fi
 
@@ -546,7 +554,7 @@ write_progress "starting" 5 "Checking prerequisites"
 
 # Get restic repository password from secrets
 RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
-[[ -z "$RESTIC_PASSWORD" ]] && { echo "$LOG_PREFIX [ERROR] No repository password found"; exit 2; }
+[[ -z "$RESTIC_PASSWORD" ]] && { log_error "No repository password found"; exit 2; }
 
 # Get notification credentials
 NTFY_URL="$(get_secret "$SECRETS_DIR" "$SECRET_NTFY_URL" || echo "")"
@@ -677,13 +685,13 @@ echo "$LOG_PREFIX Repository: $REPO"
 # Initialize repo if needed
 write_progress "initializing" 10 "Checking repository"
 if ! repo_exists "$REPO" "$RESTIC_PASSWORD"; then
-  echo "$LOG_PREFIX Initializing restic repository..."
+  log_info "Initializing restic repository..."
   if ! init_restic_repo "$REPO" "$RESTIC_PASSWORD"; then
-    echo "$LOG_PREFIX [ERROR] Failed to initialize repository"
+    log_error "Failed to initialize repository"
     send_notification "Files Backup Failed on $HOSTNAME" "Repository initialization failed" "backup_failed" "{}" "1" "siren"
     exit 3
   fi
-  echo "$LOG_PREFIX Repository initialized"
+  log_info "Repository initialized"
 fi
 
 # Site name detection functions
@@ -747,7 +755,7 @@ for dir in $WEB_PATH_PATTERN; do
 done
 
 if [[ ${#site_dirs[@]} -eq 0 ]]; then
-  echo "$LOG_PREFIX [ERROR] No directories found matching pattern: $WEB_PATH_PATTERN"
+  log_error "No directories found matching pattern: $WEB_PATH_PATTERN"
   send_notification "Files Backup Failed on $HOSTNAME" "No sites found matching pattern" "backup_failed" "{}" "1" "siren"
   exit 4
 fi
@@ -875,6 +883,9 @@ source "$INSTALL_DIR/lib/logging.sh"
 source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
+
+# Initialize structured logging (writes to /var/log/backupd.log)
+log_init "restore_script"
 
 SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
@@ -1362,6 +1373,9 @@ source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
+# Initialize structured logging (writes to /var/log/backupd.log)
+log_init "verify_quick"
+
 SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
 RCLONE_DB_PATH="%%RCLONE_DB_PATH%%"
@@ -1406,7 +1420,7 @@ echo "==== $(date +%F' '%T) START quick verification ===="
 # Get restic repository password
 RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
 if [[ -z "$RESTIC_PASSWORD" ]]; then
-  echo "$LOG_PREFIX [ERROR] No repository password found"
+  log_error "No repository password found"
   exit 2
 fi
 
@@ -1561,6 +1575,9 @@ source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
 source "$INSTALL_DIR/lib/crypto.sh"
 
+# Initialize structured logging (writes to /var/log/backupd.log)
+log_init "verify_full"
+
 SECRETS_DIR="%%SECRETS_DIR%%"
 RCLONE_REMOTE="%%RCLONE_REMOTE%%"
 RCLONE_DB_PATH="%%RCLONE_DB_PATH%%"
@@ -1605,7 +1622,7 @@ echo "==== $(date +%F' '%T) START full verification ===="
 # Get restic repository password
 RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
 if [[ -z "$RESTIC_PASSWORD" ]]; then
-  echo "$LOG_PREFIX [ERROR] No repository password found"
+  log_error "No repository password found"
   exit 2
 fi
 
