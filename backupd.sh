@@ -64,6 +64,7 @@ source "$LIB_DIR/setup.sh"      # Setup wizard
 source "$LIB_DIR/updater.sh"    # Auto-update functionality
 source "$LIB_DIR/notifications.sh" # Notification configuration
 source "$LIB_DIR/cli.sh"        # CLI subcommand dispatcher (CLIG compliant)
+source "$LIB_DIR/history.sh"    # Backup history tracking (v3.1.0)
 source "$LIB_DIR/jobs.sh"       # Multi-job management (v3.1.0)
 source "$LIB_DIR/migration.sh"  # Legacy config migration (v3.1.0)
 

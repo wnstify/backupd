@@ -45,6 +45,9 @@ LIB_MODULES=(
     "updater.sh"
     "notifications.sh"
     "cli.sh"
+    "history.sh"
+    "jobs.sh"
+    "migration.sh"
 )
 
 # Colors
