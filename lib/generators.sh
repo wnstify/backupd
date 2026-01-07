@@ -397,8 +397,14 @@ if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
     --keep-within "${RETENTION_DAYS}d" \
     --prune 2>&1; then
   echo "$LOG_PREFIX Retention policy applied"
+  # Record cleanup to history
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "success" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "1" "0" "DB cleanup: \${RETENTION_DAYS}d"
 else
   echo "$LOG_PREFIX [WARNING] Retention policy failed (backup succeeded)"
+  # Record cleanup failure to history
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "failed" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "0" "1" "DB retention policy failed"
 fi
 
 # Summary
@@ -837,8 +843,14 @@ if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
     --keep-within "${RETENTION_DAYS}d" \
     --prune 2>&1; then
   echo "$LOG_PREFIX Retention policy applied"
+  # Record cleanup to history
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "success" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "1" "0" "Files cleanup: \${RETENTION_DAYS}d"
 else
   echo "$LOG_PREFIX [WARNING] Retention policy failed (backup succeeded)"
+  # Record cleanup failure to history
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "failed" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "0" "1" "Files retention policy failed"
 fi
 
 # Summary
