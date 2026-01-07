@@ -16,6 +16,11 @@
 # Repository password is stored in secure credential storage (.c1)
 # ============================================================================
 
+# ---------- Cache Configuration ----------
+# Set default cache directory for systemd compatibility (no $HOME in services)
+export RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-/var/cache/backupd/restic}"
+mkdir -p "$RESTIC_CACHE_DIR" 2>/dev/null || true
+
 # ---------- Repository Configuration ----------
 
 # Get restic repository URL (rclone backend)
