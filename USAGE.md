@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v3.1.0** by Backupd.
+Complete usage documentation for **Backupd v3.1.1** by Backupd.
 
 > **Note:** v3.1.0 adds multi-job support for managing multiple backup configurations.
 > v3.0.0 introduced restic as the backup engine, replacing GPG+tar+pigz.
@@ -85,7 +85,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v3.1.0
+              Backupd v3.1.1
                     by Backupd
 ========================================================
 
@@ -117,7 +117,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-              Backupd v3.1.0
+              Backupd v3.1.1
                     by Backupd
 ========================================================
 

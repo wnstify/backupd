@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.1] - 2026-01-07
+
+### Fixed
+
+- **Installer missing v3.1.0 modules** - Added `history.sh`, `jobs.sh`, `migration.sh` to installer's `LIB_MODULES` array
+- **Missing history.sh source** - Added `history.sh` to backupd.sh library sources
+
+---
+
 ## [3.1.0] - 2026-01-07
 
 ### Added
@@ -1203,6 +1212,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.1.1 | 2026-01-07 | Fix installer missing v3.1.0 lib modules |
 | 3.1.0 | 2026-01-07 | Multi-job support, job CLI commands, backup history command, automatic migration |
 | 3.0.0 | 2026-01-06 | **Major release**: Restic backup engine, deduplication, retention in days |
 | 2.3.0 | 2026-01-06 | Pushover notifications, priority-based sound alerts, CLI notifications subcommand |
