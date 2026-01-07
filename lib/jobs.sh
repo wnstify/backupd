@@ -577,9 +577,10 @@ list_job_timers() {
 
   local pattern
   if [[ "$job_name" == "$DEFAULT_JOB_NAME" ]]; then
-    pattern="backupd-db\|backupd-files\|backupd-verify"
+    # Default job uses legacy timer names (backupd-db, backupd-files, etc.)
+    pattern="backupd-(db|files|verify|verify-full)\."
   else
-    pattern="backupd-${job_name}-"
+    pattern="backupd-${job_name}-(db|files|verify)\."
   fi
 
   systemctl list-timers --all 2>/dev/null | grep -E "$pattern" || echo "No timers scheduled for job '$job_name'"
