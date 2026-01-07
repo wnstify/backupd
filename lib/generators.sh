@@ -407,10 +407,18 @@ if ((${#failures[@]})); then
   send_notification "DB Backup Completed with Errors on $HOSTNAME" "Backed up: $db_count, Failed: ${failures[*]}" "backup_warning" "{}" "0" "bike"
   write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
+  # Record to history
+  ENDED_AT="\$(date -Iseconds)"
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "database" "partial" "\$STARTED_AT" "\$ENDED_AT" "" "\$db_count" "\${#failures[@]}" "Failed: \${failures[*]}"
   exit 1
 else
   send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up via restic" "backup_complete" "{}" "0" "magic"
   echo "==== $(date +%F' '%T) END (success) ===="
+  # Record to history
+  ENDED_AT="\$(date -Iseconds)"
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "database" "success" "\$STARTED_AT" "\$ENDED_AT" "" "\$db_count" "0" ""
 fi
 DBBACKUPEOF
 
