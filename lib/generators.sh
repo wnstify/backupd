@@ -1871,3 +1871,203 @@ generate_full_verify_script() {
     generate_verify_script
   fi
 }
+
+# ============================================================================
+# Job-Aware Script Generation (v3.1.0)
+# Generates scripts for specific jobs in job-specific directories
+# ============================================================================
+
+# Generate all scripts for a specific job
+# Usage: generate_job_scripts "production"
+generate_job_scripts() {
+  local job_name="$1"
+
+  # Source jobs module if not loaded
+  if ! declare -f job_exists &>/dev/null; then
+    source "$LIB_DIR/jobs.sh" 2>/dev/null || source "$INSTALL_DIR/lib/jobs.sh" 2>/dev/null || {
+      print_error "Jobs module not found"
+      return 1
+    }
+  fi
+
+  # Validate job exists
+  if ! job_exists "$job_name"; then
+    print_error "Job '$job_name' does not exist"
+    return 1
+  fi
+
+  # Get job configuration
+  local job_dir secrets_dir rclone_remote rclone_db_path rclone_files_path
+  local retention_days web_path_pattern webroot_subdir do_database do_files
+
+  job_dir="$(get_job_dir "$job_name")"
+  local job_scripts_dir="$job_dir/scripts"
+  local job_logs_dir="$job_dir/logs"
+
+  # Create directories
+  mkdir -p "$job_scripts_dir"
+  mkdir -p "$job_logs_dir"
+  chmod 700 "$job_scripts_dir"
+  chmod 700 "$job_logs_dir"
+
+  # Read job configuration
+  secrets_dir="$(get_secrets_dir 2>/dev/null || echo "$INSTALL_DIR/secrets")"
+  rclone_remote="$(get_job_config "$job_name" "RCLONE_REMOTE")"
+  rclone_db_path="$(get_job_config "$job_name" "RCLONE_DB_PATH")"
+  rclone_files_path="$(get_job_config "$job_name" "RCLONE_FILES_PATH")"
+  retention_days="$(get_job_config "$job_name" "RETENTION_DAYS")"
+  retention_days="${retention_days:-30}"
+  web_path_pattern="$(get_job_config "$job_name" "WEB_PATH_PATTERN")"
+  web_path_pattern="${web_path_pattern:-/var/www/*}"
+  webroot_subdir="$(get_job_config "$job_name" "WEBROOT_SUBDIR")"
+  webroot_subdir="${webroot_subdir:-.}"
+  do_database="$(get_job_config "$job_name" "DO_DATABASE")"
+  do_files="$(get_job_config "$job_name" "DO_FILES")"
+
+  # Validate required config
+  if [[ -z "$rclone_remote" ]]; then
+    print_error "Job '$job_name' missing RCLONE_REMOTE configuration"
+    return 1
+  fi
+
+  # Save original SCRIPTS_DIR and set to job-specific
+  local orig_scripts_dir="$SCRIPTS_DIR"
+  SCRIPTS_DIR="$job_scripts_dir"
+
+  # Generate scripts using existing functions (they use $SCRIPTS_DIR)
+  if [[ "$do_database" == "true" ]]; then
+    if [[ -z "$rclone_db_path" ]]; then
+      print_warning "Job '$job_name': DO_DATABASE=true but no RCLONE_DB_PATH"
+    else
+      generate_restic_db_backup_script "$secrets_dir" "$rclone_remote" "$rclone_db_path" "$job_logs_dir" "$retention_days"
+      _inject_job_context "$job_scripts_dir/db_backup.sh" "$job_name"
+      print_success "[$job_name] Database backup script generated"
+    fi
+  fi
+
+  if [[ "$do_files" == "true" ]]; then
+    if [[ -z "$rclone_files_path" ]]; then
+      print_warning "Job '$job_name': DO_FILES=true but no RCLONE_FILES_PATH"
+    else
+      generate_restic_files_backup_script "$secrets_dir" "$rclone_remote" "$rclone_files_path" "$job_logs_dir" "$retention_days" "$web_path_pattern" "$webroot_subdir"
+      _inject_job_context "$job_scripts_dir/files_backup.sh" "$job_name"
+      print_success "[$job_name] Files backup script generated"
+    fi
+  fi
+
+  # Generate restore script
+  generate_restic_restore_script "$secrets_dir" "$rclone_remote" "$rclone_db_path" "$rclone_files_path"
+  _inject_job_context "$job_scripts_dir/restore.sh" "$job_name"
+  print_success "[$job_name] Restore script generated"
+
+  # Generate verify scripts
+  generate_restic_verify_script "$secrets_dir" "$rclone_remote" "$rclone_db_path" "$rclone_files_path"
+  _inject_job_context "$job_scripts_dir/verify_backup.sh" "$job_name"
+  _inject_job_context "$job_scripts_dir/verify_full_backup.sh" "$job_name"
+  print_success "[$job_name] Verify scripts generated"
+
+  # Restore original SCRIPTS_DIR
+  SCRIPTS_DIR="$orig_scripts_dir"
+
+  return 0
+}
+
+# Inject job context into generated script
+# Adds JOB_NAME variable after the set -euo pipefail line
+_inject_job_context() {
+  local script_path="$1"
+  local job_name="$2"
+
+  [[ ! -f "$script_path" ]] && return 0
+
+  # Check if job context already injected
+  if grep -q "^JOB_NAME=" "$script_path" 2>/dev/null; then
+    # Update existing JOB_NAME
+    sed -i "s/^JOB_NAME=.*/JOB_NAME=\"$job_name\"/" "$script_path"
+  else
+    # Inject after 'umask 077' or 'set -euo pipefail'
+    if grep -q "^umask 077" "$script_path"; then
+      sed -i "/^umask 077/a\\
+JOB_NAME=\"$job_name\"\\
+export JOB_NAME" "$script_path"
+    elif grep -q "^set -euo pipefail" "$script_path"; then
+      sed -i "/^set -euo pipefail/a\\
+JOB_NAME=\"$job_name\"\\
+export JOB_NAME" "$script_path"
+    fi
+  fi
+}
+
+# Regenerate scripts for all configured jobs
+# Usage: regenerate_all_job_scripts
+regenerate_all_job_scripts() {
+  # Source jobs module if not loaded
+  if ! declare -f list_jobs &>/dev/null; then
+    source "$LIB_DIR/jobs.sh" 2>/dev/null || source "$INSTALL_DIR/lib/jobs.sh" 2>/dev/null || {
+      print_error "Jobs module not found"
+      return 1
+    }
+  fi
+
+  local job_name
+  local success_count=0
+  local fail_count=0
+
+  while IFS= read -r job_name; do
+    [[ -z "$job_name" ]] && continue
+    if generate_job_scripts "$job_name"; then
+      ((success_count++)) || true
+    else
+      ((fail_count++)) || true
+    fi
+  done < <(list_jobs)
+
+  if [[ $fail_count -gt 0 ]]; then
+    print_warning "Script regeneration: $success_count succeeded, $fail_count failed"
+    return 1
+  elif [[ $success_count -gt 0 ]]; then
+    print_success "Regenerated scripts for $success_count job(s)"
+  else
+    print_info "No jobs configured"
+  fi
+
+  return 0
+}
+
+# Generate scripts for default job from global config
+# Used for backward compatibility during migration
+# Usage: generate_default_job_scripts_from_config
+generate_default_job_scripts_from_config() {
+  local install_dir="${INSTALL_DIR:-/etc/backupd}"
+
+  # Source jobs module
+  if ! declare -f job_exists &>/dev/null; then
+    source "$LIB_DIR/jobs.sh" 2>/dev/null || source "$install_dir/lib/jobs.sh" 2>/dev/null || {
+      print_error "Jobs module not found"
+      return 1
+    }
+  fi
+
+  # Create default job if it doesn't exist
+  if ! job_exists "default"; then
+    create_job "default" || return 1
+  fi
+
+  # Copy global config values to default job
+  local config_file="$install_dir/.config"
+  if [[ -f "$config_file" ]]; then
+    local keys=("RCLONE_REMOTE" "RCLONE_DB_PATH" "RCLONE_FILES_PATH" "RETENTION_DAYS" "RETENTION_DESC"
+                "WEB_PATH_PATTERN" "WEBROOT_SUBDIR" "DO_DATABASE" "DO_FILES" "PANEL_KEY")
+    local key value
+
+    for key in "${keys[@]}"; do
+      value="$(grep "^${key}=" "$config_file" 2>/dev/null | cut -d'=' -f2- | tr -d '"')" || value=""
+      if [[ -n "$value" ]]; then
+        save_job_config "default" "$key" "$value"
+      fi
+    done
+  fi
+
+  # Generate scripts for default job
+  generate_job_scripts "default"
+}
