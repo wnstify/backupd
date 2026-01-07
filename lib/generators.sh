@@ -398,13 +398,13 @@ if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
     --prune 2>&1; then
   echo "$LOG_PREFIX Retention policy applied"
   # Record cleanup to history
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "cleanup" "success" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "1" "0" "DB cleanup: \${RETENTION_DAYS}d"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "success" "$(date -Iseconds)" "$(date -Iseconds)" "" "1" "0" "DB cleanup: ${RETENTION_DAYS}d"
 else
   echo "$LOG_PREFIX [WARNING] Retention policy failed (backup succeeded)"
   # Record cleanup failure to history
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "cleanup" "failed" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "0" "1" "DB retention policy failed"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "failed" "$(date -Iseconds)" "$(date -Iseconds)" "" "0" "1" "DB retention policy failed"
 fi
 
 # Summary
@@ -414,17 +414,17 @@ if ((${#failures[@]})); then
   write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "database" "partial" "\$STARTED_AT" "\$ENDED_AT" "" "\$db_count" "\${#failures[@]}" "Failed: \${failures[*]}"
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "database" "partial" "$STARTED_AT" "$ENDED_AT" "" "$db_count" "${#failures[@]}" "Failed: ${failures[*]}"
   exit 1
 else
   send_notification "DB Backup Successful on $HOSTNAME" "All $db_count databases backed up via restic" "backup_complete" "{}" "0" "magic"
   echo "==== $(date +%F' '%T) END (success) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "database" "success" "\$STARTED_AT" "\$ENDED_AT" "" "\$db_count" "0" ""
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "database" "success" "$STARTED_AT" "$ENDED_AT" "" "$db_count" "0" ""
 fi
 DBBACKUPEOF
 
@@ -844,13 +844,13 @@ if RESTIC_PASSWORD="$RESTIC_PASSWORD" restic -r "$REPO" forget \
     --prune 2>&1; then
   echo "$LOG_PREFIX Retention policy applied"
   # Record cleanup to history
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "cleanup" "success" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "1" "0" "Files cleanup: \${RETENTION_DAYS}d"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "success" "$(date -Iseconds)" "$(date -Iseconds)" "" "1" "0" "Files cleanup: ${RETENTION_DAYS}d"
 else
   echo "$LOG_PREFIX [WARNING] Retention policy failed (backup succeeded)"
   # Record cleanup failure to history
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "cleanup" "failed" "\$(date -Iseconds)" "\$(date -Iseconds)" "" "0" "1" "Files retention policy failed"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "cleanup" "failed" "$(date -Iseconds)" "$(date -Iseconds)" "" "0" "1" "Files retention policy failed"
 fi
 
 # Summary
@@ -860,17 +860,17 @@ if [[ ${#failures[@]} -gt 0 ]]; then
   write_progress "error" 100 "Backup completed with errors: ${failures[*]}" "failed"
   echo "==== $(date +%F' '%T) END (with errors) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "files" "partial" "\$STARTED_AT" "\$ENDED_AT" "" "\$success_count" "\${#failures[@]}" "Failed: \${failures[*]}"
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "files" "partial" "$STARTED_AT" "$ENDED_AT" "" "$success_count" "${#failures[@]}" "Failed: ${failures[*]}"
   exit 1
 else
   send_notification "Files Backup Success on $HOSTNAME" "$success_count sites backed up via restic" "backup_complete" "{}" "0" "magic"
   echo "==== $(date +%F' '%T) END (success) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "files" "success" "\$STARTED_AT" "\$ENDED_AT" "" "\$success_count" "0" ""
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "files" "success" "$STARTED_AT" "$ENDED_AT" "" "$success_count" "0" ""
 fi
 FILESBACKUPEOF
 
@@ -1568,17 +1568,17 @@ if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
   send_notification "Quick Check FAILED on $HOSTNAME" "DB: $db_result, Files: $files_result" "quick_verify_failed"
   echo "==== $(date +%F' '%T) END (FAILED) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "verify_quick" "failed" "\$STARTED_AT" "\$ENDED_AT" "" "2" "\$([[ \$db_result == FAILED ]] && echo 1 || echo 0)" "DB: \$db_result, Files: \$files_result"
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "verify_quick" "failed" "$STARTED_AT" "$ENDED_AT" "" "2" "$([[ $db_result == FAILED ]] && echo 1 || echo 0)" "DB: $db_result, Files: $files_result"
   exit 1
 else
   send_notification "Quick Check PASSED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details)" "quick_verify_passed"
   echo "==== $(date +%F' '%T) END (success) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "verify_quick" "success" "\$STARTED_AT" "\$ENDED_AT" "" "2" "0" ""
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "verify_quick" "success" "$STARTED_AT" "$ENDED_AT" "" "2" "0" ""
 fi
 VERIFYEOF
 
@@ -1820,17 +1820,17 @@ if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
   send_notification "Full Verification FAILED on $HOSTNAME" "DB: $db_result, Files: $files_result. Total time: ${total_duration}s" "full_verify_failed" "1"
   echo "==== $(date +%F' '%T) END (FAILED, ${total_duration}s total) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "verify_full" "failed" "\$STARTED_AT" "\$ENDED_AT" "" "2" "\$([[ \$db_result == FAILED ]] && echo 1 || echo 0)" "DB: \$db_result, Files: \$files_result"
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "verify_full" "failed" "$STARTED_AT" "$ENDED_AT" "" "2" "$([[ $db_result == FAILED ]] && echo 1 || echo 0)" "DB: $db_result, Files: $files_result"
   exit 1
 else
   send_notification "Full Verification PASSED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details). Total: ${total_duration}s" "full_verify_passed" "0"
   echo "==== $(date +%F' '%T) END (success, ${total_duration}s total) ===="
   # Record to history
-  ENDED_AT="\$(date -Iseconds)"
-  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
-    record_history "verify_full" "success" "\$STARTED_AT" "\$ENDED_AT" "" "2" "0" ""
+  ENDED_AT="$(date -Iseconds)"
+  source "$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "verify_full" "success" "$STARTED_AT" "$ENDED_AT" "" "2" "0" ""
 fi
 FULLVERIFYEOF
 
