@@ -262,6 +262,7 @@ show_help() {
   echo "  verify [--quick|--full]     Verify backup integrity"
   echo "  schedule {list|enable|disable} Manage schedules"
   echo "  logs [TYPE] [--lines N]     View backup logs"
+  echo "  history [TYPE] [--lines N]  View backup history and next runs"
   echo
   echo "Run 'backupd COMMAND --help' for more information on a command."
   echo
@@ -536,7 +537,7 @@ parse_arguments() {
 
   # Check for subcommands first (dispatch to CLI handler)
   case "${1:-}" in
-    backup|restore|status|verify|schedule|logs|notifications)
+    backup|restore|status|verify|schedule|logs|notifications|history)
       # Initialize logging before dispatch (since we exit after)
       log_init "$@"
       trap 'log_end' EXIT

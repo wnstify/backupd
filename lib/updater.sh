@@ -462,6 +462,13 @@ do_update() {
   # Clear update check cache
   rm -f "$UPDATE_CHECK_FILE"
 
+  # Auto-regenerate backup scripts to include new features
+  print_info "Regenerating backup scripts..."
+  source "$LIB_DIR/notifications.sh" 2>/dev/null || true
+  if type regenerate_scripts_silent &>/dev/null; then
+    regenerate_scripts_silent && print_success "Backup scripts regenerated" || print_warning "Script regeneration skipped"
+  fi
+
   echo
   print_success "Update complete! Version: ${latest_version}"
   echo

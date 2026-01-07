@@ -74,6 +74,9 @@ cli_dispatch() {
     notifications)
       cli_notifications "$@"
       ;;
+    history)
+      cli_history "$@"
+      ;;
     *)
       print_error "Unknown command: $subcommand"
       echo "Run 'backupd --help' for usage information."
@@ -1902,5 +1905,122 @@ Note: For ntfy and webhook configuration, use the interactive menu:
   sudo backupd -> Notifications
 
 See also: status, backup
+EOF
+}
+
+# ---------- History Subcommand ----------
+
+cli_history() {
+  local history_type="all" lines=20
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1; export JSON_OUTPUT ;;
+      --lines|-n) [[ -n "${2:-}" ]] && lines="$2" && shift ;;
+      --lines=*) lines="${1#--lines=}" ;;
+      db|database) history_type="database" ;;
+      files) history_type="files" ;;
+      backup|backups) history_type="backup" ;;
+      verify|verifications) history_type="verify" ;;
+      verify_quick|quick) history_type="verify_quick" ;;
+      verify_full|full) history_type="verify_full" ;;
+      cleanup|prune) history_type="cleanup" ;;
+      all) history_type="all" ;;
+      --help|-h) cli_history_help; return 0 ;;
+      *) [[ "$1" == -* ]] && print_error "Unknown option: $1" && return $EXIT_USAGE ;;
+    esac
+    shift
+  done
+
+  source "$LIB_DIR/history.sh" 2>/dev/null || { print_error "History module not found"; return 1; }
+
+  if is_json_output; then
+    cli_history_json "$history_type" "$lines"
+  else
+    cli_history_text "$history_type" "$lines"
+  fi
+}
+
+cli_history_text() {
+  local type="$1" lines="$2"
+  echo "Backup History"; echo "=============="
+
+  local history_json=$(get_history "$type" "$lines")
+  [[ "$history_json" == "[]" ]] && echo "No backup history recorded yet." && return 0
+
+  printf "\n%-10s %-8s %-20s %-10s %-6s\n" "TYPE" "STATUS" "STARTED" "DURATION" "ITEMS"
+  printf "%-10s %-8s %-20s %-10s %-6s\n" "----------" "--------" "--------------------" "----------" "------"
+
+  # Parse with jq if available, fallback to grep/sed
+  if command -v jq >/dev/null 2>&1; then
+    echo "$history_json" | jq -r '.[] | [.type, .status, .started_at, .duration_seconds, .items_count] | @tsv' | \
+    while IFS=$'\t' read -r t s st d i; do
+      printf "%-10s %-8s %-20s %-10s %-6s\n" "$t" "$s" "${st:0:19}" "$(format_duration $d)" "$i"
+    done
+  else
+    echo "$history_json" | grep -o '{[^}]*}' | while read -r rec; do
+      local t=$(echo "$rec" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+      local s=$(echo "$rec" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+      local st=$(echo "$rec" | sed -n 's/.*"started_at":"\([^"]*\)".*/\1/p'); st="${st%%+*}"; st="${st/T/ }"
+      local d=$(echo "$rec" | sed -n 's/.*"duration_seconds":\([0-9]*\).*/\1/p')
+      local i=$(echo "$rec" | sed -n 's/.*"items_count":\([0-9]*\).*/\1/p')
+      printf "%-10s %-8s %-20s %-10s %-6s\n" "$t" "$s" "${st:0:19}" "$(format_duration $d)" "$i"
+    done
+  fi
+
+  echo; echo "Next scheduled operations:"
+  local timers=$(systemctl list-timers backupd-*.timer --no-pager 2>/dev/null | grep -E "backupd-(db|files|verify|verify-full).timer")
+  if [[ -n "$timers" ]]; then
+    local db_t=$(echo "$timers" | grep "backupd-db" | awk '{print $1, $2, $3}')
+    local files_t=$(echo "$timers" | grep "backupd-files" | awk '{print $1, $2, $3}')
+    local verify_t=$(echo "$timers" | grep "backupd-verify.timer" | awk '{print $1, $2, $3}')
+    local verify_full_t=$(echo "$timers" | grep "backupd-verify-full" | awk '{print $1, $2, $3}')
+    [[ -n "$db_t" ]] && echo "  Database:     $db_t"
+    [[ -n "$files_t" ]] && echo "  Files:        $files_t"
+    [[ -n "$verify_t" ]] && echo "  Verify Quick: $verify_t"
+    [[ -n "$verify_full_t" ]] && echo "  Verify Full:  $verify_full_t"
+  else
+    echo "  No timers scheduled"
+  fi
+}
+
+cli_history_json() {
+  local type="$1" lines="$2"
+  local hist=$(get_history "$type" "$lines")
+  local next=$(get_next_backup_times)
+  echo "{\"type\":\"$type\",\"records\":$hist,\"next_scheduled\":$next}"
+}
+
+cli_history_help() {
+  cat <<'EOF'
+Usage: backupd history [TYPE] [OPTIONS]
+
+View operation history including status, duration, and scheduled jobs.
+
+Types (Backups):
+  db, database       Database backup history only
+  files              Files backup history only
+  backup, backups    All backup types (database + files)
+
+Types (Maintenance):
+  verify             All verification history (quick + full)
+  verify_quick       Quick integrity check history only
+  verify_full        Full verification history only
+  cleanup, prune     Cleanup/retention history only
+
+Types (Combined):
+  all                All operation history (default)
+
+Options:
+  --lines N, -n N    Records to show (default: 20)
+  --json             JSON output for scripting
+  --help, -h         Show this help
+
+Examples:
+  backupd history                 # Last 20 operations (all types)
+  backupd history db -n 50        # Last 50 database backups
+  backupd history verify          # All verification results
+  backupd history cleanup         # Retention policy history
+  backupd history backup --json   # All backups in JSON format
 EOF
 }
