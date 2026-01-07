@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.0] - 2026-01-07
+
+### Added
+
+- **Multi-Job Support** - Manage multiple independent backup jobs
+  - Each job has its own configuration, scripts, and schedules
+  - Jobs can target different remote destinations
+  - All jobs share the same database credentials and restic password
+  - New CLI: `backupd job {list|show|create|delete|clone|run|enable|disable}`
+
+- **Job Management Commands**
+  - `backupd job list` - List all configured jobs
+  - `backupd job show <name>` - Display job configuration and status
+  - `backupd job create <name>` - Create a new backup job
+  - `backupd job delete <name>` - Delete a job and its timers
+  - `backupd job clone <src> <dst>` - Clone job configuration
+  - `backupd job run <name> [db|files|all]` - Run backup for specific job
+  - `backupd job enable/disable <name>` - Enable or disable a job
+  - `backupd job regenerate <name>` - Regenerate backup scripts
+  - `backupd job timers <name>` - Show systemd timers for a job
+
+- **Automatic Migration** - Existing single-config installations automatically migrate to "default" job on first run
+
+- **Job-Aware History** - Backup history now tracks which job performed each backup
+  - New `job` field in history records
+  - Filter history by job: `get_job_history "production"`
+
+### Changed
+
+- **Directory Structure** - Jobs stored in `/etc/backupd/jobs/{jobname}/`
+  - `job.conf` - Job-specific configuration
+  - `scripts/` - Generated backup scripts for the job
+
+- **Backward Compatibility** - Existing commands work on "default" job
+  - `backupd backup db` uses default job configuration
+  - Legacy timer names preserved for default job
+
+---
+
 ## [3.0.0] - 2026-01-06
 
 ### Changed
@@ -1155,6 +1194,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.1.0 | 2026-01-07 | Multi-job support, job CLI commands, automatic migration, job-aware history |
 | 3.0.0 | 2026-01-06 | **Major release**: Restic backup engine, deduplication, retention in days |
 | 2.3.0 | 2026-01-06 | Pushover notifications, priority-based sound alerts, CLI notifications subcommand |
 | 2.2.11 | 2026-01-06 | REST API support flags, progress file tracking, global flags fix, passphrase redaction |

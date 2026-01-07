@@ -394,6 +394,7 @@ This tool is designed with security in mind but is provided "as is". Users are r
 
 | Version | Security Changes |
 |---------|-----------------|
+| 3.1.0 | Multi-job isolation (separate scripts per job), job-level access control, migration preserves existing security settings |
 | 3.0.0 | Replaced GPG encryption with restic (AES-256-CTR + Poly1305-AES), removed pigz dependency, built-in deduplication and verification |
 | 2.3.0 | Pushover credentials encrypted with AES-256 (.c8, .c9), HTTPS-only API communication |
 | 2.2.11 | Passphrase redaction in logs (--passphrase VALUE and BACKUPD_PASSPHRASE=value now sanitized before logging) |
