@@ -13,7 +13,7 @@ is_configured() {
 get_config_value() {
   local key="$1"
   if [[ -f "$CONFIG_FILE" ]]; then
-    grep "^${key}=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d '"'
+    grep "^${key}=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true
   fi
 }
 
