@@ -64,6 +64,8 @@ source "$LIB_DIR/setup.sh"      # Setup wizard
 source "$LIB_DIR/updater.sh"    # Auto-update functionality
 source "$LIB_DIR/notifications.sh" # Notification configuration
 source "$LIB_DIR/cli.sh"        # CLI subcommand dispatcher (CLIG compliant)
+source "$LIB_DIR/jobs.sh"       # Multi-job management (v3.1.0)
+source "$LIB_DIR/migration.sh"  # Legacy config migration (v3.1.0)
 
 # ---------- Install Command ----------
 
@@ -263,6 +265,7 @@ show_help() {
   echo "  schedule {list|enable|disable} Manage schedules"
   echo "  logs [TYPE] [--lines N]     View backup logs"
   echo "  history [TYPE] [--lines N]  View backup history and next runs"
+  echo "  job {list|create|delete|...} Manage backup jobs (v3.1)"
   echo
   echo "Run 'backupd COMMAND --help' for more information on a command."
   echo
@@ -537,7 +540,7 @@ parse_arguments() {
 
   # Check for subcommands first (dispatch to CLI handler)
   case "${1:-}" in
-    backup|restore|status|verify|schedule|logs|notifications|history)
+    backup|restore|status|verify|schedule|logs|notifications|history|job|jobs)
       # Initialize logging before dispatch (since we exit after)
       log_init "$@"
       trap 'log_end' EXIT
@@ -670,6 +673,9 @@ if [[ ! -L "/usr/local/bin/backupd" ]]; then
   debug_info "Installing backupd command"
   install_command
 fi
+
+# Auto-migrate legacy config to multi-job structure (v3.1.0)
+auto_migrate_if_needed
 
 # Run main menu
 debug_info "Entering main menu"
