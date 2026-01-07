@@ -1432,6 +1432,7 @@ rotate_log "$LOG"
 touch "$LOG" && chmod 600 "$LOG"
 exec > >(tee -a "$LOG") 2>&1
 echo "==== $(date +%F' '%T) START quick verification ===="
+STARTED_AT="\$(date -Iseconds)"
 
 # Get restic repository password
 RESTIC_PASSWORD="$(get_secret "$SECRETS_DIR" "$SECRET_PASSPHRASE")"
@@ -1554,10 +1555,18 @@ fi
 if [[ "$db_result" == "FAILED" || "$files_result" == "FAILED" ]]; then
   send_notification "Quick Check FAILED on $HOSTNAME" "DB: $db_result, Files: $files_result" "quick_verify_failed"
   echo "==== $(date +%F' '%T) END (FAILED) ===="
+  # Record to history
+  ENDED_AT="\$(date -Iseconds)"
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "verify_quick" "failed" "\$STARTED_AT" "\$ENDED_AT" "" "2" "\$([[ \$db_result == FAILED ]] && echo 1 || echo 0)" "DB: \$db_result, Files: \$files_result"
   exit 1
 else
   send_notification "Quick Check PASSED on $HOSTNAME" "DB: $db_result ($db_details), Files: $files_result ($files_details)" "quick_verify_passed"
   echo "==== $(date +%F' '%T) END (success) ===="
+  # Record to history
+  ENDED_AT="\$(date -Iseconds)"
+  source "\$INSTALL_DIR/lib/history.sh" 2>/dev/null && \
+    record_history "verify_quick" "success" "\$STARTED_AT" "\$ENDED_AT" "" "2" "0" ""
 fi
 VERIFYEOF
 
