@@ -2068,6 +2068,9 @@ cli_job() {
     timers)
       cli_job_timers "$@"
       ;;
+    run|backup)
+      cli_job_run "$@"
+      ;;
     --help|-h|help)
       cli_job_help
       return 0
@@ -2469,6 +2472,120 @@ cli_job_timers() {
   fi
 }
 
+cli_job_run() {
+  local job_name="" backup_type="all" dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --dry-run|-n) dry_run=true ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *)
+        if [[ -z "$job_name" ]]; then
+          job_name="$1"
+        else
+          backup_type="$1"
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job run <job_name> [db|files|all]"
+    return $EXIT_USAGE
+  fi
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Running backups requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  if ! job_exists "$job_name"; then
+    print_error "Job '$job_name' does not exist"
+    return $EXIT_NOINPUT
+  fi
+
+  if ! is_job_enabled "$job_name"; then
+    print_error "Job '$job_name' is disabled. Enable it first: backupd job enable $job_name"
+    return 1
+  fi
+
+  # Validate backup type
+  case "$backup_type" in
+    db|database) backup_type="db" ;;
+    files) backup_type="files" ;;
+    all|both) backup_type="all" ;;
+    *)
+      print_error "Invalid backup type: $backup_type"
+      echo "Valid types: db, files, all"
+      return $EXIT_USAGE
+      ;;
+  esac
+
+  local job_scripts_dir
+  job_scripts_dir="$(get_job_scripts_dir "$job_name")"
+
+  # Check scripts exist
+  if [[ "$backup_type" == "db" || "$backup_type" == "all" ]]; then
+    if [[ ! -x "$job_scripts_dir/db_backup.sh" ]]; then
+      print_error "Database backup script not found for job '$job_name'"
+      print_info "Run: backupd job regenerate $job_name"
+      return $EXIT_NOINPUT
+    fi
+  fi
+
+  if [[ "$backup_type" == "files" || "$backup_type" == "all" ]]; then
+    if [[ ! -x "$job_scripts_dir/files_backup.sh" ]]; then
+      print_error "Files backup script not found for job '$job_name'"
+      print_info "Run: backupd job regenerate $job_name"
+      return $EXIT_NOINPUT
+    fi
+  fi
+
+  if $dry_run; then
+    print_info "Dry run - would execute:"
+    [[ "$backup_type" == "db" || "$backup_type" == "all" ]] && echo "  $job_scripts_dir/db_backup.sh"
+    [[ "$backup_type" == "files" || "$backup_type" == "all" ]] && echo "  $job_scripts_dir/files_backup.sh"
+    return 0
+  fi
+
+  local exit_code=0
+
+  # Run database backup
+  if [[ "$backup_type" == "db" || "$backup_type" == "all" ]]; then
+    print_info "Running database backup for job '$job_name'..."
+    export JOB_NAME="$job_name"
+    if "$job_scripts_dir/db_backup.sh"; then
+      print_success "Database backup completed for job '$job_name'"
+    else
+      print_error "Database backup failed for job '$job_name'"
+      exit_code=1
+    fi
+  fi
+
+  # Run files backup
+  if [[ "$backup_type" == "files" || "$backup_type" == "all" ]]; then
+    print_info "Running files backup for job '$job_name'..."
+    export JOB_NAME="$job_name"
+    if "$job_scripts_dir/files_backup.sh"; then
+      print_success "Files backup completed for job '$job_name'"
+    else
+      print_error "Files backup failed for job '$job_name'"
+      exit_code=1
+    fi
+  fi
+
+  if is_json_output; then
+    echo "{\"status\": \"$([ $exit_code -eq 0 ] && echo success || echo error)\", \"job\": \"$job_name\", \"type\": \"$backup_type\"}"
+  fi
+
+  return $exit_code
+}
+
 cli_job_help() {
   cat <<'EOF'
 Usage: backupd job [COMMAND] [OPTIONS]
@@ -2484,11 +2601,13 @@ Commands:
   clone <src> <dst>           Clone a job configuration
   enable <name>               Enable a disabled job
   disable <name>              Disable a job (stops timers)
+  run <name> [db|files|all]   Run backup for a specific job
   regenerate <name> | --all   Regenerate backup scripts for job(s)
   timers <name>               Show systemd timers for a job
 
 Options:
   --json            Output in JSON format
+  --dry-run, -n     Preview what would be executed (for run)
   --force, -f       Force operation (for delete)
   --all, -a         Apply to all jobs (for regenerate)
   --help, -h        Show this help message
@@ -2510,6 +2629,10 @@ Examples:
   backupd job delete staging            # Delete job
   backupd job enable production         # Enable job
   backupd job disable production        # Disable job
+  backupd job run production db         # Run database backup for job
+  backupd job run production files      # Run files backup for job
+  backupd job run production all        # Run all backups for job
+  backupd job run production --dry-run  # Preview backup execution
   backupd job regenerate production     # Regenerate scripts
   backupd job regenerate --all          # Regenerate all jobs
   backupd job timers production         # Show job timers
