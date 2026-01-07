@@ -30,9 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Automatic Migration** - Existing single-config installations automatically migrate to "default" job on first run
 
-- **Job-Aware History** - Backup history now tracks which job performed each backup
-  - New `job` field in history records
-  - Filter history by job: `get_job_history "production"`
+- **Backup History Command** - View operation history via CLI
+  - `backupd history` - Show last 20 operations
+  - `backupd history db -n 50` - Filter by type, control count
+  - `backupd history verify` - View verification history
+  - `backupd history --json` - JSON output for APIs/scripts
+  - Types: `db`, `files`, `backup`, `verify`, `verify_quick`, `verify_full`, `cleanup`
+  - Storage: `/etc/backupd/history.jsonl` (auto-rotating, max 50 records)
+
+- **Job-Aware History** - History tracks which job performed each operation
+  - New `job` field in all history records
+  - `get_job_history()` - Filter history by job name
+  - `get_history_by_jobs()` - Summary statistics per job
 
 ### Changed
 
@@ -1194,7 +1203,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 3.1.0 | 2026-01-07 | Multi-job support, job CLI commands, automatic migration, job-aware history |
+| 3.1.0 | 2026-01-07 | Multi-job support, job CLI commands, backup history command, automatic migration |
 | 3.0.0 | 2026-01-06 | **Major release**: Restic backup engine, deduplication, retention in days |
 | 2.3.0 | 2026-01-06 | Pushover notifications, priority-based sound alerts, CLI notifications subcommand |
 | 2.2.11 | 2026-01-06 | REST API support flags, progress file tracking, global flags fix, passphrase redaction |

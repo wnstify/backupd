@@ -232,6 +232,19 @@ sudo backupd schedule disable       # Disable schedules
 # View logs
 sudo backupd logs                   # View all logs
 sudo backupd logs db --lines 50     # Last 50 lines of db log
+
+# Backup history
+sudo backupd history                # Last 20 operations
+sudo backupd history db -n 50       # Last 50 database backups
+sudo backupd history verify         # Verification history
+sudo backupd history --json         # JSON output for APIs
+
+# Multi-job management (v3.1.0)
+sudo backupd job list               # List all jobs
+sudo backupd job show <name>        # Show job details
+sudo backupd job create <name>      # Create new job
+sudo backupd job clone <src> <dst>  # Clone job config
+sudo backupd job run <name> db      # Run backup for job
 ```
 
 ### CLI Flags

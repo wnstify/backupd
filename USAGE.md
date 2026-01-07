@@ -19,6 +19,8 @@ Complete usage documentation for **Backupd v3.1.0** by Backupd.
 - [Restoring Backups](#restoring-backups)
 - [Managing Schedules](#managing-schedules)
 - [Viewing Status & Logs](#viewing-status--logs)
+  - [Viewing Backup History](#viewing-backup-history)
+  - [Job-Specific History](#job-specific-history-v310)
 - [Notifications](#notifications)
 - [Updating the Tool](#updating-the-tool)
 - [Command Line Usage](#command-line-usage)
@@ -1030,6 +1032,143 @@ Logs are displayed using `less` for easy navigation:
 - Press `q` to quit
 - Press `/` to search
 - Press `G` to go to end
+
+### Viewing Backup History
+
+The `history` command shows a record of all backup, verification, and cleanup operations:
+
+```bash
+# Show last 20 operations (default)
+sudo backupd history
+
+# Show specific operation types
+sudo backupd history db              # Database backups only
+sudo backupd history files           # Files backups only
+sudo backupd history backup          # All backup types
+sudo backupd history verify          # All verifications
+sudo backupd history verify_quick    # Quick checks only
+sudo backupd history verify_full     # Full verifications only
+sudo backupd history cleanup         # Retention cleanup operations
+
+# Control output
+sudo backupd history -n 50           # Show last 50 records
+sudo backupd history --lines 100     # Same as -n
+
+# JSON output (for scripting/APIs)
+sudo backupd history --json
+sudo backupd history db --json -n 10
+```
+
+**Example output:**
+
+```
+Backup History (last 20 operations)
+================================================================================
+TYPE          STATUS    STARTED              DURATION  ITEMS
+--------------------------------------------------------------------------------
+database      success   2026-01-07 03:00:01  45s       5
+files         success   2026-01-07 03:05:12  2m 30s    12
+verify_quick  success   2026-01-05 02:00:00  15s       -
+cleanup       success   2026-01-07 03:06:45  5s        3
+database      success   2026-01-06 03:00:01  42s       5
+--------------------------------------------------------------------------------
+
+Next scheduled operations:
+  Database backup: Tue 2026-01-07 04:00:00 UTC
+  Files backup: Wed 2026-01-08 03:00:00 UTC
+  Quick check: Sun 2026-01-12 02:00:00 UTC
+  Full verify: Sat 2026-02-01 03:00:00 UTC
+```
+
+**Available history types:**
+
+| Type | Aliases | Description |
+|------|---------|-------------|
+| `all` | (default) | All operation types |
+| `database` | `db` | Database backup operations |
+| `files` | - | Files backup operations |
+| `backup` | `backups` | Database + files backups combined |
+| `verify_quick` | `quick` | Weekly quick integrity checks |
+| `verify_full` | `full` | Monthly full verifications |
+| `verify` | `verifications` | All verification types |
+| `cleanup` | `prune` | Retention policy operations |
+
+**JSON output format:**
+
+```json
+{
+  "type": "all",
+  "records": [
+    {
+      "id": "backup-database-1704585601",
+      "job": "default",
+      "type": "database",
+      "status": "success",
+      "started_at": "2026-01-07T03:00:01+00:00",
+      "ended_at": "2026-01-07T03:00:46+00:00",
+      "duration_seconds": 45,
+      "snapshot_id": "abc12345",
+      "items_count": 5,
+      "items_failed": 0,
+      "error": "",
+      "hostname": "myserver"
+    }
+  ],
+  "next_scheduled": {
+    "database": "Tue 2026-01-07 04:00:00 UTC",
+    "files": "Wed 2026-01-08 03:00:00 UTC",
+    "verify_quick": "Sun 2026-01-12 02:00:00 UTC",
+    "verify_full": "Sat 2026-02-01 03:00:00 UTC"
+  }
+}
+```
+
+**History storage:**
+- Location: `/etc/backupd/history.jsonl`
+- Format: JSON Lines (one record per line)
+- Max records: 50 (auto-rotates oldest)
+- Permissions: 600 (root only)
+
+### Job-Specific History (v3.1.0+)
+
+With multi-job support, each history record includes which job performed the operation:
+
+```bash
+# View history for specific job
+sudo backupd job show production    # Includes recent history
+
+# Filter history by job (programmatic)
+# In scripts, use the get_job_history function:
+source /etc/backupd/lib/history.sh
+get_job_history "production" "all" 20     # Last 20 ops for production job
+get_job_history "staging" "database" 10   # Last 10 DB backups for staging
+```
+
+**Job history summary:**
+
+```bash
+# Get summary statistics for all jobs (programmatic)
+source /etc/backupd/lib/history.sh
+get_history_by_jobs
+```
+
+Returns:
+```json
+{
+  "default": {
+    "total": 45,
+    "success": 43,
+    "failed": 2,
+    "last_backup": "2026-01-07T03:00:46+00:00"
+  },
+  "production": {
+    "total": 20,
+    "success": 20,
+    "failed": 0,
+    "last_backup": "2026-01-07T02:00:15+00:00"
+  }
+}
+```
 
 ---
 
