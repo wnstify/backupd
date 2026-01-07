@@ -77,6 +77,9 @@ cli_dispatch() {
     history)
       cli_history "$@"
       ;;
+    job|jobs)
+      cli_job "$@"
+      ;;
     *)
       print_error "Unknown command: $subcommand"
       echo "Run 'backupd --help' for usage information."
@@ -2022,5 +2025,498 @@ Examples:
   backupd history verify          # All verification results
   backupd history cleanup         # Retention policy history
   backupd history backup --json   # All backups in JSON format
+EOF
+}
+
+# ---------- Job Subcommand (v3.1.0) ----------
+
+cli_job() {
+  local action="${1:-list}"
+  shift || true
+
+  # Load jobs module
+  source "$LIB_DIR/jobs.sh" 2>/dev/null || source "$INSTALL_DIR/lib/jobs.sh" 2>/dev/null || {
+    print_error "Jobs module not found"
+    return 1
+  }
+
+  case "$action" in
+    list|ls)
+      cli_job_list "$@"
+      ;;
+    show|info)
+      cli_job_show "$@"
+      ;;
+    create|add|new)
+      cli_job_create "$@"
+      ;;
+    delete|rm|remove)
+      cli_job_delete "$@"
+      ;;
+    clone|copy)
+      cli_job_clone "$@"
+      ;;
+    enable)
+      cli_job_enable "$@"
+      ;;
+    disable)
+      cli_job_disable "$@"
+      ;;
+    regenerate|regen)
+      cli_job_regenerate "$@"
+      ;;
+    timers)
+      cli_job_timers "$@"
+      ;;
+    --help|-h|help)
+      cli_job_help
+      return 0
+      ;;
+    *)
+      print_error "Unknown job action: $action"
+      cli_job_help
+      return $EXIT_USAGE
+      ;;
+  esac
+}
+
+cli_job_list() {
+  local json_output=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json_output="--json"; JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      *) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+    esac
+    shift
+  done
+
+  list_jobs_detailed "$json_output"
+}
+
+cli_job_show() {
+  local job_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *) job_name="$1" ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job show <job_name>"
+    return $EXIT_USAGE
+  fi
+
+  if ! job_exists "$job_name"; then
+    print_error "Job '$job_name' does not exist"
+    return $EXIT_NOINPUT
+  fi
+
+  local job_dir
+  job_dir="$(get_job_dir "$job_name")"
+  local config_file="$job_dir/job.conf"
+
+  if is_json_output; then
+    _job_status_json "$job_name"
+    echo
+  else
+    echo "Job: $job_name"
+    echo "===================="
+    echo
+    echo "Configuration:"
+    while IFS='=' read -r key value; do
+      [[ -z "$key" || "$key" == \#* ]] && continue
+      key="${key//\"/}"
+      value="${value//\"/}"
+      printf "  %-20s = %s\n" "$key" "$value"
+    done < "$config_file"
+
+    echo
+    echo "Scripts:"
+    local scripts_dir="$job_dir/scripts"
+    if [[ -d "$scripts_dir" ]]; then
+      for script in "$scripts_dir"/*.sh; do
+        [[ -f "$script" ]] && echo "  - $(basename "$script")"
+      done
+    else
+      echo "  (none generated)"
+    fi
+
+    echo
+    echo "Timers:"
+    list_job_timers "$job_name"
+  fi
+}
+
+cli_job_create() {
+  local job_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *) job_name="$1" ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job create <job_name>"
+    return $EXIT_USAGE
+  fi
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Job creation requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  if create_job "$job_name"; then
+    if is_json_output; then
+      echo "{\"status\": \"success\", \"job\": \"$job_name\", \"message\": \"Job created\"}"
+    fi
+    return 0
+  else
+    if is_json_output; then
+      echo "{\"status\": \"error\", \"job\": \"$job_name\", \"message\": \"Failed to create job\"}"
+    fi
+    return 1
+  fi
+}
+
+cli_job_delete() {
+  local job_name=""
+  local force=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force|-f) force="--force" ;;
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *) job_name="$1" ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job delete <job_name> [--force]"
+    return $EXIT_USAGE
+  fi
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Job deletion requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  if delete_job "$job_name" "$force"; then
+    if is_json_output; then
+      echo "{\"status\": \"success\", \"job\": \"$job_name\", \"message\": \"Job deleted\"}"
+    fi
+    return 0
+  else
+    if is_json_output; then
+      echo "{\"status\": \"error\", \"job\": \"$job_name\", \"message\": \"Failed to delete job\"}"
+    fi
+    return 1
+  fi
+}
+
+cli_job_clone() {
+  local src_job="" dst_job=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *)
+        if [[ -z "$src_job" ]]; then
+          src_job="$1"
+        elif [[ -z "$dst_job" ]]; then
+          dst_job="$1"
+        else
+          print_error "Too many arguments"
+          return $EXIT_USAGE
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$src_job" || -z "$dst_job" ]]; then
+    print_error "Source and destination job names required"
+    echo "Usage: backupd job clone <source_job> <new_job>"
+    return $EXIT_USAGE
+  fi
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Job cloning requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  if clone_job "$src_job" "$dst_job"; then
+    if is_json_output; then
+      echo "{\"status\": \"success\", \"source\": \"$src_job\", \"destination\": \"$dst_job\"}"
+    fi
+    return 0
+  else
+    if is_json_output; then
+      echo "{\"status\": \"error\", \"source\": \"$src_job\", \"destination\": \"$dst_job\"}"
+    fi
+    return 1
+  fi
+}
+
+cli_job_enable() {
+  local job_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *) job_name="$1" ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job enable <job_name>"
+    return $EXIT_USAGE
+  fi
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Job management requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  if enable_job "$job_name"; then
+    if is_json_output; then
+      echo "{\"status\": \"success\", \"job\": \"$job_name\", \"enabled\": true}"
+    fi
+    return 0
+  else
+    if is_json_output; then
+      echo "{\"status\": \"error\", \"job\": \"$job_name\"}"
+    fi
+    return 1
+  fi
+}
+
+cli_job_disable() {
+  local job_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *) job_name="$1" ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job disable <job_name>"
+    return $EXIT_USAGE
+  fi
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Job management requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  if disable_job "$job_name"; then
+    if is_json_output; then
+      echo "{\"status\": \"success\", \"job\": \"$job_name\", \"enabled\": false}"
+    fi
+    return 0
+  else
+    if is_json_output; then
+      echo "{\"status\": \"error\", \"job\": \"$job_name\"}"
+    fi
+    return 1
+  fi
+}
+
+cli_job_regenerate() {
+  local job_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all|-a) job_name="__all__" ;;
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *) job_name="$1" ;;
+    esac
+    shift
+  done
+
+  # Require root
+  if [[ $EUID -ne 0 ]]; then
+    print_error "Script regeneration requires root privileges."
+    return $EXIT_NOPERM
+  fi
+
+  # Require configuration
+  if ! is_configured; then
+    print_error "System not configured. Run 'backupd' to set up first."
+    return $EXIT_NOT_CONFIGURED
+  fi
+
+  # Source generators
+  source "$LIB_DIR/generators.sh" 2>/dev/null || source "$INSTALL_DIR/lib/generators.sh" 2>/dev/null || {
+    print_error "Generators module not found"
+    return 1
+  }
+
+  if [[ "$job_name" == "__all__" ]]; then
+    if regenerate_all_job_scripts; then
+      if is_json_output; then
+        echo "{\"status\": \"success\", \"message\": \"All job scripts regenerated\"}"
+      fi
+      return 0
+    else
+      if is_json_output; then
+        echo "{\"status\": \"error\", \"message\": \"Some scripts failed to regenerate\"}"
+      fi
+      return 1
+    fi
+  elif [[ -n "$job_name" ]]; then
+    if generate_job_scripts "$job_name"; then
+      if is_json_output; then
+        echo "{\"status\": \"success\", \"job\": \"$job_name\"}"
+      fi
+      return 0
+    else
+      if is_json_output; then
+        echo "{\"status\": \"error\", \"job\": \"$job_name\"}"
+      fi
+      return 1
+    fi
+  else
+    print_error "Job name required (or use --all)"
+    echo "Usage: backupd job regenerate <job_name> | --all"
+    return $EXIT_USAGE
+  fi
+}
+
+cli_job_timers() {
+  local job_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *) job_name="$1" ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job timers <job_name>"
+    return $EXIT_USAGE
+  fi
+
+  if ! job_exists "$job_name"; then
+    print_error "Job '$job_name' does not exist"
+    return $EXIT_NOINPUT
+  fi
+
+  if is_json_output; then
+    local db_enabled=false files_enabled=false
+    local db_schedule="" files_schedule=""
+    local db_timer files_timer
+
+    db_timer="$(get_timer_name "$job_name" "db").timer"
+    files_timer="$(get_timer_name "$job_name" "files").timer"
+
+    if systemctl is-enabled "$db_timer" &>/dev/null; then
+      db_enabled=true
+      db_schedule=$(grep -E "^OnCalendar=" "/etc/systemd/system/$db_timer" 2>/dev/null | cut -d'=' -f2)
+    fi
+
+    if systemctl is-enabled "$files_timer" &>/dev/null; then
+      files_enabled=true
+      files_schedule=$(grep -E "^OnCalendar=" "/etc/systemd/system/$files_timer" 2>/dev/null | cut -d'=' -f2)
+    fi
+
+    echo "{\"job\": \"$job_name\", \"timers\": {\"db\": {\"enabled\": $db_enabled, \"schedule\": \"$db_schedule\"}, \"files\": {\"enabled\": $files_enabled, \"schedule\": \"$files_schedule\"}}}"
+  else
+    echo "Timers for job: $job_name"
+    echo
+    list_job_timers "$job_name"
+  fi
+}
+
+cli_job_help() {
+  cat <<'EOF'
+Usage: backupd job [COMMAND] [OPTIONS]
+
+Manage multiple backup jobs. Each job can have its own remote destination,
+schedules, and configuration while sharing credentials.
+
+Commands:
+  list, ls                    List all configured jobs (default)
+  show <name>                 Show job configuration and status
+  create <name>               Create a new backup job
+  delete <name> [--force]     Delete a job (and its timers)
+  clone <src> <dst>           Clone a job configuration
+  enable <name>               Enable a disabled job
+  disable <name>              Disable a job (stops timers)
+  regenerate <name> | --all   Regenerate backup scripts for job(s)
+  timers <name>               Show systemd timers for a job
+
+Options:
+  --json            Output in JSON format
+  --force, -f       Force operation (for delete)
+  --all, -a         Apply to all jobs (for regenerate)
+  --help, -h        Show this help message
+
+Requires: Root privileges for create/delete/enable/disable/regenerate.
+
+Job naming rules:
+  - 2-32 characters
+  - Alphanumeric, dash, underscore only
+  - Must start with letter or number
+  - Reserved names: all, list, help, none, null, undefined
+
+Examples:
+  backupd job list                      # List all jobs
+  backupd job list --json               # JSON output
+  backupd job show production           # Show job details
+  backupd job create staging            # Create new job
+  backupd job clone production staging  # Clone job
+  backupd job delete staging            # Delete job
+  backupd job enable production         # Enable job
+  backupd job disable production        # Disable job
+  backupd job regenerate production     # Regenerate scripts
+  backupd job regenerate --all          # Regenerate all jobs
+  backupd job timers production         # Show job timers
+
+After creating a job, configure it with the interactive menu:
+  sudo backupd
+
+See also: backup, status, schedule
 EOF
 }
