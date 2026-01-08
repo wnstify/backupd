@@ -10,8 +10,35 @@ GITHUB_API_URL="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
 GITHUB_RELEASE_URL="https://github.com/${GITHUB_REPO}/releases/download"
 
 # Update check cache (check once per 24 hours)
-UPDATE_CHECK_FILE="/tmp/.backupd-update-check"
+# BUG-004 FIX: Use user-specific cache directory to prevent symlink attacks
+get_update_cache_file() {
+  local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/backupd"
+  if [[ ! -d "$cache_dir" ]]; then
+    mkdir -p "$cache_dir" 2>/dev/null && chmod 700 "$cache_dir" 2>/dev/null
+  fi
+  echo "${cache_dir}/update-check"
+}
+
 UPDATE_CHECK_INTERVAL=$((24 * 60))  # 24 hours in minutes
+
+# Retry wrapper for curl commands (handles transient network failures)
+# BUG-012 FIX: Add retry logic to downloads
+curl_with_retry() {
+  local max_retries=3
+  local retry=0
+  local delay=2
+
+  while ((retry < max_retries)); do
+    if curl "$@"; then
+      return 0
+    fi
+    ((retry++))
+    if ((retry < max_retries)); then
+      sleep $((delay * retry))
+    fi
+  done
+  return 1
+}
 
 # ---------- Version Comparison ----------
 
@@ -23,6 +50,16 @@ version_compare() {
   # Remove 'v' prefix if present
   v1="${v1#v}"
   v2="${v2#v}"
+
+  # BUG-017 FIX: Validate inputs - empty versions are invalid
+  if [[ -z "$v1" ]] || [[ -z "$v2" ]]; then
+    log_warn "version_compare: empty version string (v1='$v1', v2='$v2')" 2>/dev/null || true
+    return 3  # Invalid input
+  fi
+
+  # BUG-007 FIX: Remove pre-release suffix (e.g., -alpha, -beta, -rc1)
+  v1="${v1%%-*}"
+  v2="${v2%%-*}"
 
   if [[ "$v1" == "$v2" ]]; then
     return 0
@@ -63,10 +100,24 @@ is_update_available() {
 # Check GitHub for latest version
 get_latest_version() {
   local latest=""
+  local response=""
 
   # Try to get latest release from GitHub API
+  # BUG-009 FIX: Add --tlsv1.2 to enforce minimum TLS version
   if command -v curl &>/dev/null; then
-    latest=$(curl -s --proto '=https' --connect-timeout 5 "$GITHUB_API_URL" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    if ! response=$(curl -s --proto '=https' --tlsv1.2 --connect-timeout 5 "$GITHUB_API_URL" 2>/dev/null); then
+      # BUG-018 FIX: Log failure for debugging
+      log_debug "Failed to fetch latest version from GitHub API" 2>/dev/null || true
+      echo ""
+      return 1
+    fi
+
+    # BUG-013 FIX: Use jq for robust JSON parsing if available, fallback to grep/sed
+    if command -v jq &>/dev/null; then
+      latest=$(echo "$response" | jq -r '.tag_name // empty' 2>/dev/null)
+    else
+      latest=$(echo "$response" | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    fi
   fi
 
   # Remove 'v' prefix if present
@@ -90,12 +141,12 @@ get_checksum_url() {
 # Should we check for updates? (respects 24h cache)
 should_check_updates() {
   # Skip if no network check file or file is old
-  if [[ ! -f "$UPDATE_CHECK_FILE" ]]; then
+  if [[ ! -f "$(get_update_cache_file)" ]]; then
     return 0  # Should check
   fi
 
   # Check if file is older than UPDATE_CHECK_INTERVAL minutes
-  if [[ $(find "$UPDATE_CHECK_FILE" -mmin +${UPDATE_CHECK_INTERVAL} 2>/dev/null) ]]; then
+  if [[ $(find "$(get_update_cache_file)" -mmin +${UPDATE_CHECK_INTERVAL} 2>/dev/null) ]]; then
     return 0  # Should check
   fi
 
@@ -104,39 +155,59 @@ should_check_updates() {
 
 # Silent update check on startup (non-blocking)
 check_for_updates_silent() {
-  # Skip if recently checked
-  if ! should_check_updates; then
-    # Read cached result
-    if [[ -f "$UPDATE_CHECK_FILE" ]]; then
-      local cached_version
-      cached_version=$(cat "$UPDATE_CHECK_FILE" 2>/dev/null)
-      if [[ -n "$cached_version" && "$cached_version" != "$VERSION" ]]; then
-        if is_update_available "$VERSION" "$cached_version"; then
-          echo "$cached_version"
-          return 0
+  # BUG-015 FIX: Use flock to prevent race conditions with multiple instances
+  # The subshell with flock ensures only one instance checks at a time
+  local lock_file="$(get_update_cache_file).lock"
+  local result
+
+  result=$(
+    # Try to acquire lock non-blocking (-n), exit if already held
+    if command -v flock &>/dev/null; then
+      exec 200>"$lock_file"
+      flock -n 200 || exit 1
+    fi
+
+    # Skip if recently checked
+    if ! should_check_updates; then
+      # Read cached result
+      if [[ -f "$(get_update_cache_file)" ]]; then
+        local cached_version
+        cached_version=$(cat "$(get_update_cache_file)" 2>/dev/null)
+        if [[ -n "$cached_version" && "$cached_version" != "$VERSION" ]]; then
+          if is_update_available "$VERSION" "$cached_version"; then
+            echo "$cached_version"
+            exit 0
+          fi
         fi
       fi
+      exit 1
     fi
-    return 1
-  fi
 
-  # Check for network connectivity first (quick check)
-  if ! ping -c 1 -W 2 8.8.8.8 &>/dev/null && ! ping -c 1 -W 2 1.1.1.1 &>/dev/null; then
-    return 1  # No network
-  fi
+    # BUG-006 FIX: Check network using HTTP (ICMP often blocked in containers/firewalls)
+    if ! curl -sfI --proto '=https' --tlsv1.2 --connect-timeout 2 "https://api.github.com" &>/dev/null; then
+      exit 1  # No network or GitHub unreachable
+    fi
 
-  # Get latest version
-  local latest
-  latest=$(get_latest_version)
+    # Get latest version
+    local latest
+    latest=$(get_latest_version)
 
-  # Cache the result
-  echo "$latest" > "$UPDATE_CHECK_FILE" 2>/dev/null || true
+    # Cache the result
+    echo "$latest" > "$(get_update_cache_file)" 2>/dev/null || true
 
-  if [[ -n "$latest" ]] && is_update_available "$VERSION" "$latest"; then
-    echo "$latest"
+    if [[ -n "$latest" ]] && is_update_available "$VERSION" "$latest"; then
+      echo "$latest"
+      exit 0
+    fi
+
+    exit 1
+  )
+  local exit_code=$?
+
+  if [[ $exit_code -eq 0 && -n "$result" ]]; then
+    echo "$result"
     return 0
   fi
-
   return 1
 }
 
@@ -180,7 +251,9 @@ download_update() {
   # Download release archive with strict security options
   # -s: silent, -f: fail on HTTP errors, -L: follow redirects
   # --proto '=https': only allow HTTPS protocol
-  if ! curl -sfL --proto '=https' --connect-timeout 10 --max-time 300 "$release_url" -o "${temp_dir}/update.tar.gz"; then
+  # BUG-009 FIX: Add --tlsv1.2 for minimum TLS version
+  # BUG-012 FIX: Use curl_with_retry for transient network failures
+  if ! curl_with_retry -sfL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 300 "$release_url" -o "${temp_dir}/update.tar.gz"; then
     print_error "Failed to download update"
     return 1
   fi
@@ -195,7 +268,8 @@ download_update() {
   local checksum_file="${temp_dir}/SHA256SUMS"
   print_info "Downloading checksum..."
 
-  if ! curl -sfL --proto '=https' --connect-timeout 10 "$checksum_url" -o "$checksum_file" 2>/dev/null; then
+  # BUG-009+012+014 FIX: Add --tlsv1.2, --max-time, and use curl_with_retry
+  if ! curl_with_retry -sfL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 60 "$checksum_url" -o "$checksum_file" 2>/dev/null; then
     print_error "Failed to download checksum file"
     print_error "Updates require SHA256 verification for security"
     return 1
@@ -211,7 +285,8 @@ download_update() {
 
   # Extract expected checksum for our file
   local expected_checksum
-  expected_checksum=$(grep "backupd-v${version}.tar.gz" "$checksum_file" 2>/dev/null | awk '{print $1}')
+  # BUG-008 FIX: Use grep -F for fixed string matching (prevents regex injection)
+  expected_checksum=$(grep -F "backupd-v${version}.tar.gz" "$checksum_file" 2>/dev/null | awk '{print $1}')
 
   if [[ -z "$expected_checksum" ]]; then
     print_error "Checksum for backupd-v${version}.tar.gz not found in SHA256SUMS"
@@ -243,10 +318,14 @@ backup_current_version() {
   # Remove old backup if exists
   [[ -d "$backup_dir" ]] && rm -rf "$backup_dir"
 
-  # Create backup
-  cp -r "$SCRIPT_DIR" "$backup_dir"
+  # BUG-005 FIX: Check backup success (could fail due to disk full or permissions)
+  if ! cp -r "$SCRIPT_DIR" "$backup_dir"; then
+    print_error "Failed to backup current version (disk full or permission denied)"
+    return 1
+  fi
 
   print_success "Current version backed up to: $backup_dir"
+  return 0
 }
 
 # Restore from backup (rollback)
@@ -255,6 +334,7 @@ rollback_update() {
   debug_enter "rollback_update" 2>/dev/null || true
   log_warn "Rolling back update"
   local backup_dir="${SCRIPT_DIR}.backup"
+  local failed_dir="${SCRIPT_DIR}.failed"
 
   if [[ ! -d "$backup_dir" ]]; then
     print_error "No backup found to restore"
@@ -263,13 +343,33 @@ rollback_update() {
 
   print_info "Rolling back to previous version..."
 
-  # Remove current (failed) version
-  rm -rf "$SCRIPT_DIR"
+  # BUG-011 FIX: Safe rollback using rename instead of delete
+  # This prevents having no installation if mv fails
 
-  # Restore backup
-  mv "$backup_dir" "$SCRIPT_DIR"
+  # Step 1: Rename current (failed) version to .failed
+  if [[ -d "$SCRIPT_DIR" ]]; then
+    rm -rf "$failed_dir" 2>/dev/null || true  # Clean up any previous failed attempt
+    if ! mv "$SCRIPT_DIR" "$failed_dir"; then
+      print_error "Failed to move current installation aside"
+      return 1
+    fi
+  fi
+
+  # Step 2: Restore backup
+  if ! mv "$backup_dir" "$SCRIPT_DIR"; then
+    print_error "Failed to restore backup"
+    # Try to recover by moving failed version back
+    if [[ -d "$failed_dir" ]]; then
+      mv "$failed_dir" "$SCRIPT_DIR" 2>/dev/null || true
+    fi
+    return 1
+  fi
+
+  # Step 3: Only delete failed version after successful restore
+  rm -rf "$failed_dir" 2>/dev/null || true
 
   print_success "Rollback complete"
+  return 0
 }
 
 # Apply update
@@ -283,6 +383,12 @@ apply_update() {
   # Extract to temp location first
   local extract_dir="${temp_dir}/extracted"
   mkdir -p "$extract_dir"
+
+  # BUG-002 FIX: Security check for path traversal attacks before extraction
+  if tar -tzf "${temp_dir}/update.tar.gz" 2>/dev/null | grep -qE '(^/|^\.\./|/\.\./|/\.\.$)'; then
+    print_error "Archive contains suspicious paths (possible path traversal attack)"
+    return 1
+  fi
 
   if ! tar -xzf "${temp_dir}/update.tar.gz" -C "$extract_dir"; then
     print_error "Failed to extract update"
@@ -301,13 +407,52 @@ apply_update() {
     return 1
   fi
 
-  # Copy new files over existing installation
-  # This preserves any files not in the update (like local configs)
-  cp -r "${source_dir}/"* "$SCRIPT_DIR/"
+  # BUG-010 FIX: Atomic update using staging directory
+  # This prevents partial updates if copy fails mid-way
+  local staging_dir="${SCRIPT_DIR}.staging"
+  local old_dir="${SCRIPT_DIR}.old"
 
-  # Ensure scripts are executable
-  chmod +x "$SCRIPT_DIR/backupd.sh"
-  chmod +x "$SCRIPT_DIR/lib/"*.sh 2>/dev/null || true
+  # Step 1: Create staging directory with copy of current installation
+  rm -rf "$staging_dir" 2>/dev/null || true
+  if ! cp -r "$SCRIPT_DIR" "$staging_dir"; then
+    print_error "Failed to create staging directory"
+    return 1
+  fi
+
+  # Step 2: Apply new files to staging
+  if ! cp -r "${source_dir}/"* "$staging_dir/"; then
+    print_error "Failed to apply update to staging"
+    rm -rf "$staging_dir"
+    return 1
+  fi
+
+  # Step 3: Verify staging (syntax check)
+  chmod +x "$staging_dir/backupd.sh"
+  chmod +x "$staging_dir/lib/"*.sh 2>/dev/null || true
+
+  if ! bash -n "$staging_dir/backupd.sh" 2>/dev/null; then
+    print_error "Syntax error in staged update"
+    rm -rf "$staging_dir"
+    return 1
+  fi
+
+  # Step 4: Atomic swap - move current to old, staging to current
+  rm -rf "$old_dir" 2>/dev/null || true
+  if ! mv "$SCRIPT_DIR" "$old_dir"; then
+    print_error "Failed to move current installation aside"
+    rm -rf "$staging_dir"
+    return 1
+  fi
+
+  if ! mv "$staging_dir" "$SCRIPT_DIR"; then
+    print_error "Failed to install staged update"
+    # Try to recover
+    mv "$old_dir" "$SCRIPT_DIR" 2>/dev/null || true
+    return 1
+  fi
+
+  # Step 5: Clean up old version only after successful swap
+  rm -rf "$old_dir" 2>/dev/null || true
 
   return 0
 }
@@ -436,7 +581,13 @@ do_update() {
   fi
 
   # Backup current version
-  backup_current_version
+  # BUG-005 FIX: Check backup return value before proceeding
+  if ! backup_current_version; then
+    print_error "Cannot proceed without backup"
+    rm -rf "$temp_dir"
+    press_enter_to_continue
+    return 1
+  fi
 
   # Apply update
   if ! apply_update "$temp_dir"; then
@@ -460,7 +611,7 @@ do_update() {
   rm -rf "$temp_dir"
 
   # Clear update check cache
-  rm -f "$UPDATE_CHECK_FILE"
+  rm -f "$(get_update_cache_file)"
 
   # Auto-regenerate backup scripts to include new features
   print_info "Regenerating backup scripts..."
@@ -532,7 +683,8 @@ download_from_branch() {
   local url="${GITHUB_RAW_URL}/${branch}/${file_path}"
 
   # Use strict curl options for security
-  if ! curl -sfL --proto '=https' --connect-timeout 10 "$url" -o "$dest_path" 2>/dev/null; then
+  # BUG-009+012+014 FIX: Add --tlsv1.2, --max-time, and use curl_with_retry
+  if ! curl_with_retry -sfL --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 "$url" -o "$dest_path" 2>/dev/null; then
     return 1
   fi
 
@@ -586,12 +738,14 @@ do_dev_update() {
 
   # List of files to download (must match all lib files in backupd.sh source order)
   local main_script="backupd.sh"
+  # BUG-001 FIX: Include all lib modules sourced by backupd.sh
   local lib_files=(
     "lib/core.sh"
     "lib/exitcodes.sh"
     "lib/debug.sh"
     "lib/logging.sh"
     "lib/crypto.sh"
+    "lib/restic.sh"       # Added: restic backup engine (v3.0)
     "lib/config.sh"
     "lib/generators.sh"
     "lib/status.sh"
@@ -603,6 +757,9 @@ do_dev_update() {
     "lib/updater.sh"
     "lib/notifications.sh"
     "lib/cli.sh"
+    "lib/history.sh"      # Added: backup history tracking (v3.1.0)
+    "lib/jobs.sh"         # Added: multi-job management (v3.1.0)
+    "lib/migration.sh"    # Added: legacy config migration (v3.1.0)
   )
 
   # Download main script
@@ -630,7 +787,13 @@ do_dev_update() {
   echo
 
   # Backup current version
-  backup_current_version
+  # BUG-005 FIX: Check backup return value before proceeding
+  if ! backup_current_version; then
+    print_error "Cannot proceed without backup"
+    rm -rf "$temp_dir"
+    press_enter_to_continue
+    return 1
+  fi
 
   # Apply the update
   print_info "Applying update..."
@@ -645,7 +808,18 @@ do_dev_update() {
     chmod +x "${SCRIPT_DIR}/${lib_file}"
   done
 
-  # Basic syntax check
+  # BUG-003+016 FIX: Check all lib files for syntax errors before main script
+  for lib_file in "${SCRIPT_DIR}"/lib/*.sh; do
+    if [[ -f "$lib_file" ]] && ! bash -n "$lib_file" 2>/dev/null; then
+      print_error "Syntax error in $(basename "$lib_file"), rolling back..."
+      rollback_update
+      rm -rf "$temp_dir"
+      press_enter_to_continue
+      return 1
+    fi
+  done
+
+  # Basic syntax check for main script
   if ! bash -n "${SCRIPT_DIR}/backupd.sh" 2>/dev/null; then
     print_error "Syntax error in updated script, rolling back..."
     rollback_update

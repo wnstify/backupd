@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.2] - 2026-01-08
+
+### Fixed
+
+- **CRITICAL: Missing lib modules in dev-update** - Added 4 missing modules (`restic.sh`, `history.sh`, `jobs.sh`, `migration.sh`) to `lib_files` array in `do_dev_update()` (BUG-001)
+
+### Security
+
+- **Path traversal protection** - Added archive validation before tar extraction to prevent malicious path escapes (BUG-002)
+- **Symlink attack prevention** - Moved update cache from `/tmp/` to `~/.cache/backupd/` (BUG-004)
+- **TLS 1.2+ enforcement** - Added `--tlsv1.2` to all curl commands (BUG-009)
+- **Regex injection prevention** - Changed checksum lookup to use `grep -F` for fixed string matching (BUG-008)
+
+### Improved
+
+- **Network reliability** - Replaced ICMP ping with HTTP check to `api.github.com` for connectivity (BUG-006)
+- **Download resilience** - Added `curl_with_retry()` helper with 3 attempts and exponential backoff (BUG-012)
+- **Backup safety** - Added return code checking to `backup_current_version()` to prevent updates without valid backup (BUG-005)
+- **Safe rollback** - Changed rollback to rename-before-delete pattern to prevent installation loss on failure (BUG-011)
+- **Atomic updates** - Implemented staging directory approach for atomic update application (BUG-010)
+- **Dev update validation** - Added syntax check for all lib files before completing dev updates (BUG-003, BUG-016)
+- **JSON parsing** - Added jq-based parsing with regex fallback for GitHub API responses (BUG-013)
+- **Download timeouts** - Added `--max-time` to checksum and dev downloads (BUG-014)
+- **Race condition prevention** - Added flock to prevent multiple simultaneous update checks (BUG-015)
+- **Version comparison** - Fixed handling of pre-release versions and empty strings (BUG-007, BUG-017)
+- **Error logging** - Added debug logging for API failures in `get_latest_version()` (BUG-018)
+
+---
+
 ## [3.1.1] - 2026-01-07
 
 ### Fixed
@@ -1212,6 +1241,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.1.2 | 2026-01-08 | Security & reliability fixes for updater (18 bugs) |
 | 3.1.1 | 2026-01-07 | Fix installer missing v3.1.0 lib modules |
 | 3.1.0 | 2026-01-07 | Multi-job support, job CLI commands, backup history command, automatic migration |
 | 3.0.0 | 2026-01-06 | **Major release**: Restic backup engine, deduplication, retention in days |
