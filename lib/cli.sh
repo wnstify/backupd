@@ -2628,9 +2628,35 @@ cli_job_schedule() {
     return 0
   fi
 
-  # TODO: BACKUPD-013 - Add timer creation handler
+  # BACKUPD-013: Create timer handler
+  # Require both backup_type and schedule
+  if [[ -z "$backup_type" ]] || [[ -z "$schedule" ]]; then
+    print_error "Backup type and schedule required to create timer"
+    echo "Usage: backupd job schedule <job_name> <backup_type> <schedule>"
+    echo "Example: backupd job schedule prod db '*-*-* 02:00:00'"
+    return 2
+  fi
 
-  return 0
+  local timer_name
+  timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
+
+  # Redirect create_job_timer output when JSON mode
+  if is_json_output; then
+    if create_job_timer "$job_name" "$backup_type" "$schedule" >/dev/null 2>&1; then
+      echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\"}"
+      return 0
+    else
+      echo "{\"error\": \"Failed to create timer\", \"job\": \"$job_name\", \"backup_type\": \"$backup_type\"}"
+      return 5
+    fi
+  else
+    if ! create_job_timer "$job_name" "$backup_type" "$schedule"; then
+      print_error "Failed to create timer for $job_name $backup_type"
+      return 5
+    fi
+    # create_job_timer already prints success message
+    return 0
+  fi
 }
 
 cli_job_run() {
