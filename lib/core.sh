@@ -27,6 +27,160 @@ QUIET_MODE=${QUIET_MODE:-0}
 JSON_OUTPUT=${JSON_OUTPUT:-0}
 DRY_RUN=${DRY_RUN:-0}
 
+# ---------- Package Manager Functions ----------
+
+# Package manager detection (cached)
+PKG_MANAGER="${PKG_MANAGER:-}"
+PKG_UPDATED="${PKG_UPDATED:-false}"
+
+# Detect the system's package manager based on OS distribution
+detect_package_manager() {
+    if [[ -n "$PKG_MANAGER" ]]; then
+        echo "$PKG_MANAGER"
+        return
+    fi
+
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        case "$ID" in
+            debian|ubuntu|linuxmint|pop|elementary|zorin|kali|raspbian)
+                PKG_MANAGER="apt"
+                ;;
+            rhel|centos|fedora|almalinux|rocky|ol|amzn)
+                if command -v dnf &>/dev/null; then
+                    PKG_MANAGER="dnf"
+                else
+                    PKG_MANAGER="yum"
+                fi
+                ;;
+            arch|manjaro|endeavouros|artix)
+                PKG_MANAGER="pacman"
+                ;;
+            alpine)
+                PKG_MANAGER="apk"
+                ;;
+            opensuse*|sles|suse)
+                PKG_MANAGER="zypper"
+                ;;
+            *)
+                PKG_MANAGER="unknown"
+                ;;
+        esac
+    elif [[ -f /etc/redhat-release ]]; then
+        if command -v dnf &>/dev/null; then
+            PKG_MANAGER="dnf"
+        else
+            PKG_MANAGER="yum"
+        fi
+    elif [[ -f /etc/debian_version ]]; then
+        PKG_MANAGER="apt"
+    elif [[ -f /etc/arch-release ]]; then
+        PKG_MANAGER="pacman"
+    elif [[ -f /etc/alpine-release ]]; then
+        PKG_MANAGER="apk"
+    else
+        PKG_MANAGER="unknown"
+    fi
+
+    echo "$PKG_MANAGER"
+}
+
+# Update package manager cache (runs only once per session)
+pkg_update() {
+    if [[ "$PKG_UPDATED" == "true" ]]; then
+        return 0
+    fi
+
+    local pm
+    pm=$(detect_package_manager)
+
+    case "$pm" in
+        apt)
+            apt-get update -qq 2>/dev/null || true
+            ;;
+        pacman)
+            pacman -Sy --noconfirm &>/dev/null || true
+            ;;
+        apk)
+            apk update &>/dev/null || true
+            ;;
+        zypper)
+            zypper refresh -q &>/dev/null || true
+            ;;
+        dnf|yum)
+            # dnf/yum auto-refresh metadata, no update needed
+            ;;
+        *)
+            # Unknown package manager, skip update
+            ;;
+    esac
+
+    PKG_UPDATED=true
+}
+
+# Install a package using the detected package manager
+pkg_install() {
+    local package="$1"
+    local pm
+    pm=$(detect_package_manager)
+
+    case "$pm" in
+        apt)
+            apt-get install -y -qq "$package" 2>/dev/null
+            ;;
+        dnf)
+            dnf install -y -q "$package" 2>/dev/null
+            ;;
+        yum)
+            yum install -y -q "$package" 2>/dev/null
+            ;;
+        pacman)
+            pacman -S --noconfirm --needed "$package" &>/dev/null
+            ;;
+        apk)
+            apk add --quiet "$package" 2>/dev/null
+            ;;
+        zypper)
+            zypper install -y -q "$package" 2>/dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Get the install command hint for user-facing error messages
+get_install_hint() {
+    local package="$1"
+    local pm
+    pm=$(detect_package_manager)
+
+    case "$pm" in
+        apt)
+            echo "sudo apt install $package"
+            ;;
+        dnf)
+            echo "sudo dnf install $package"
+            ;;
+        yum)
+            echo "sudo yum install $package"
+            ;;
+        pacman)
+            echo "sudo pacman -S $package"
+            ;;
+        apk)
+            echo "sudo apk add $package"
+            ;;
+        zypper)
+            echo "sudo zypper install $package"
+            ;;
+        *)
+            echo "Install '$package' using your system's package manager"
+            ;;
+    esac
+}
+
 # ---------- Print Functions ----------
 
 print_header() {
@@ -727,7 +881,7 @@ install_rclone_verified() {
   if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
     print_warning "Failed to extract (is unzip installed?)"
     # Try to install unzip and retry
-    apt-get install -y -qq unzip 2>/dev/null || true
+    pkg_install unzip || true
     if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
       print_error "Failed to extract rclone"
       return 1

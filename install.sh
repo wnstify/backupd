@@ -58,6 +58,158 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Package manager detection (cached)
+PKG_MANAGER=""
+PKG_UPDATED=false
+
+# Detect the system's package manager based on OS distribution
+detect_package_manager() {
+    if [[ -n "$PKG_MANAGER" ]]; then
+        echo "$PKG_MANAGER"
+        return
+    fi
+
+    if [[ -f /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        case "$ID" in
+            debian|ubuntu|linuxmint|pop|elementary|zorin|kali|raspbian)
+                PKG_MANAGER="apt"
+                ;;
+            rhel|centos|fedora|almalinux|rocky|ol|amzn)
+                if command -v dnf &>/dev/null; then
+                    PKG_MANAGER="dnf"
+                else
+                    PKG_MANAGER="yum"
+                fi
+                ;;
+            arch|manjaro|endeavouros|artix)
+                PKG_MANAGER="pacman"
+                ;;
+            alpine)
+                PKG_MANAGER="apk"
+                ;;
+            opensuse*|sles|suse)
+                PKG_MANAGER="zypper"
+                ;;
+            *)
+                PKG_MANAGER="unknown"
+                ;;
+        esac
+    elif [[ -f /etc/redhat-release ]]; then
+        if command -v dnf &>/dev/null; then
+            PKG_MANAGER="dnf"
+        else
+            PKG_MANAGER="yum"
+        fi
+    elif [[ -f /etc/debian_version ]]; then
+        PKG_MANAGER="apt"
+    elif [[ -f /etc/arch-release ]]; then
+        PKG_MANAGER="pacman"
+    elif [[ -f /etc/alpine-release ]]; then
+        PKG_MANAGER="apk"
+    else
+        PKG_MANAGER="unknown"
+    fi
+
+    echo "$PKG_MANAGER"
+}
+
+# Update package manager cache (runs only once per session)
+pkg_update() {
+    if [[ "$PKG_UPDATED" == "true" ]]; then
+        return 0
+    fi
+
+    local pm
+    pm=$(detect_package_manager)
+
+    case "$pm" in
+        apt)
+            apt-get update -qq 2>/dev/null || true
+            ;;
+        pacman)
+            pacman -Sy --noconfirm &>/dev/null || true
+            ;;
+        apk)
+            apk update &>/dev/null || true
+            ;;
+        zypper)
+            zypper refresh -q &>/dev/null || true
+            ;;
+        dnf|yum)
+            # dnf/yum auto-refresh metadata, no update needed
+            ;;
+        *)
+            # Unknown package manager, skip update
+            ;;
+    esac
+
+    PKG_UPDATED=true
+}
+
+# Install a package using the detected package manager
+pkg_install() {
+    local package="$1"
+    local pm
+    pm=$(detect_package_manager)
+
+    case "$pm" in
+        apt)
+            apt-get install -y -qq "$package" 2>/dev/null
+            ;;
+        dnf)
+            dnf install -y -q "$package" 2>/dev/null
+            ;;
+        yum)
+            yum install -y -q "$package" 2>/dev/null
+            ;;
+        pacman)
+            pacman -S --noconfirm --needed "$package" &>/dev/null
+            ;;
+        apk)
+            apk add --quiet "$package" 2>/dev/null
+            ;;
+        zypper)
+            zypper install -y -q "$package" 2>/dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Get the install command hint for user-facing error messages
+get_install_hint() {
+    local package="$1"
+    local pm
+    pm=$(detect_package_manager)
+
+    case "$pm" in
+        apt)
+            echo "sudo apt install $package"
+            ;;
+        dnf)
+            echo "sudo dnf install $package"
+            ;;
+        yum)
+            echo "sudo yum install $package"
+            ;;
+        pacman)
+            echo "sudo pacman -S $package"
+            ;;
+        apk)
+            echo "sudo apk add $package"
+            ;;
+        zypper)
+            echo "sudo zypper install $package"
+            ;;
+        *)
+            echo "Install '$package' using your system's package manager"
+            ;;
+    esac
+}
+
 print_banner() {
     echo -e "${CYAN}"
     echo "╔═══════════════════════════════════════════════════════════╗"
@@ -130,8 +282,18 @@ check_system() {
 install_dependencies() {
     echo -e "${BLUE}[2/5] Installing dependencies...${NC}"
 
-    # Update package list (suppress output)
-    apt-get update -qq 2>/dev/null || true
+    # Detect and display package manager
+    local pm
+    pm=$(detect_package_manager)
+    if [[ "$pm" == "unknown" ]]; then
+        echo -e "  ${YELLOW}Warning: Unsupported distribution detected${NC}"
+        echo -e "  ${YELLOW}Please install manually: bzip2, unzip, argon2 (optional)${NC}"
+        echo -e "  ${YELLOW}Continuing without package installation...${NC}"
+    else
+        echo -e "  Package manager: ${GREEN}${pm}${NC}"
+        # Update package list (suppress output)
+        pkg_update
+    fi
 
     # Install restic if not present (with checksum verification)
     # v3.0: restic replaces tar+pigz+GPG as the backup engine
@@ -150,7 +312,7 @@ install_dependencies() {
     # Install argon2 for modern encryption (recommended)
     if ! command -v argon2 &> /dev/null; then
         echo -e "  Installing argon2 (for modern encryption)..."
-        apt-get install -y -qq argon2 2>/dev/null || echo -e "  ${YELLOW}argon2 install failed - will use PBKDF2 fallback${NC}"
+        pkg_install argon2 || echo -e "  ${YELLOW}argon2 install failed - will use PBKDF2 fallback${NC}"
     fi
     if command -v argon2 &> /dev/null; then
         echo -e "  argon2: ${GREEN}OK${NC} (Argon2id encryption enabled)"
@@ -267,7 +429,7 @@ install_rclone_verified() {
     if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
         echo -e "    ${YELLOW}Failed to extract (is unzip installed?)${NC}"
         # Try to install unzip and retry
-        apt-get install -y -qq unzip 2>/dev/null || true
+        pkg_install unzip || true
         if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
             echo -e "    ${YELLOW}Failed to extract rclone${NC}"
             return 1
@@ -382,7 +544,7 @@ install_restic_verified() {
     # Check if bzip2 is available
     if ! command -v bunzip2 &>/dev/null; then
         echo -e "    Installing bzip2..."
-        apt-get install -y -qq bzip2 2>/dev/null || {
+        pkg_install bzip2 || {
             echo -e "    ${YELLOW}Failed to install bzip2${NC}"
             return 1
         }

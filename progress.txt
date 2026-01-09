@@ -1,0 +1,26 @@
+# Ralph Progress Log
+Started: Fri Jan  9 12:04:37 PM UTC 2026
+---
+
+## Codebase Patterns
+- Package manager functions (`detect_package_manager`, `pkg_install`, `pkg_update`, `get_install_hint`) are defined in BOTH `install.sh` and `lib/core.sh` - keep synchronized
+- Use `PKG_MANAGER` and `PKG_UPDATED` globals with `${VAR:-}` pattern for shell compatibility
+- `detect_package_manager()` caches result in `PKG_MANAGER` global for performance
+- Supported distros: debian/ubuntu/mint/pop/elementary/zorin/kali/raspbian (apt), rhel/centos/fedora/almalinux/rocky/ol/amzn (dnf/yum), arch/manjaro/endeavouros/artix (pacman), alpine (apk), opensuse/sles/suse (zypper)
+
+---
+
+## 2026-01-09 - US-001
+Iteration: 1
+- Implemented package manager auto-detection for all major Linux distributions
+- Added functions: `detect_package_manager()`, `pkg_install()`, `pkg_update()`, `get_install_hint()`
+- Files changed:
+  - `install.sh` - Added package manager functions (lines 61-211), replaced all `apt-get` calls
+  - `lib/core.sh` - Added same package manager functions (lines 30-182), replaced `apt-get install unzip` call
+  - `prd.json` - Created from PRD markdown for Ralph tracking
+- **Learnings for future iterations:**
+  - PRD was in markdown format (`tasks/prd-multi-package-manager-support.md`), created `prd.json` for Ralph
+  - Package manager functions must exist in both `install.sh` (standalone installer) and `lib/core.sh` (sourced by main script)
+  - Keep package manager functions identical in both files - any changes need dual updates
+  - The `lib/core.sh` is sourced by `backupd.sh`, so functions defined there are available to all lib modules
+---
