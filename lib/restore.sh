@@ -159,6 +159,14 @@ inline_restore_database() {
   local snapshot_id="$3"
   local secrets_dir="$4"
 
+  # Setup cleanup trap for temp files (credential security)
+  local MYSQL_AUTH_FILE="" temp_sql=""
+  cleanup_restore_temp_files() {
+    [[ -f "${temp_sql:-}" ]] && rm -f "$temp_sql"
+    [[ -f "${MYSQL_AUTH_FILE:-}" ]] && rm -f "$MYSQL_AUTH_FILE"
+  }
+  trap cleanup_restore_temp_files RETURN EXIT INT TERM
+
   # Resolve 'latest' to actual snapshot ID
   if [[ "$snapshot_id" == "latest" ]]; then
     snapshot_id="$(RESTIC_PASSWORD="$password" restic -r "$repo" snapshots --tag database --json --latest 1 2>/dev/null | grep -o '"short_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
@@ -181,7 +189,7 @@ inline_restore_database() {
   fi
 
   # Get database credentials
-  local DB_USER DB_PASS MYSQL_AUTH_FILE=""
+  local DB_USER DB_PASS
   DB_USER="$(get_secret "$secrets_dir" ".c2" || echo "")"
   DB_PASS="$(get_secret "$secrets_dir" ".c3" || echo "")"
   local MYSQL_ARGS=()
@@ -223,10 +231,7 @@ AUTHEOF
   else
     print_error "Failed to extract database from snapshot"
   fi
-
-  # Cleanup
-  [[ -f "$temp_sql" ]] && rm -f "$temp_sql"
-  [[ -n "$MYSQL_AUTH_FILE" && -f "$MYSQL_AUTH_FILE" ]] && rm -f "$MYSQL_AUTH_FILE"
+  # Cleanup handled by trap set at function start
 }
 
 inline_restore_files() {
@@ -246,9 +251,12 @@ inline_restore_files() {
   fi
 
   echo "Restoring files to $target_path..."
-  if RESTIC_PASSWORD="$password" restic -r "$repo" restore "$snapshot_id" --target "$target_path" 2>&1; then
+  local restore_output
+  if restore_output=$(RESTIC_PASSWORD="$password" restic -r "$repo" restore "$snapshot_id" --target "$target_path" 2>&1); then
     print_success "Files restored successfully to $target_path"
   else
+    # Sanitize output before displaying (hide sensitive paths)
     print_error "Files restore failed"
+    log_error "Restore failed: $(echo "$restore_output" | head -5)"
   fi
 }
