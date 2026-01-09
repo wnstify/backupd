@@ -603,6 +603,21 @@ enable_job() {
   save_job_config "$job_name" "JOB_ENABLED" "true"
   print_success "Enabled job '$job_name'"
 
+  # Recreate timers from stored schedule config
+  local types=("db" "files" "verify" "verify-full")
+  local config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+  local i schedule
+
+  for i in "${!types[@]}"; do
+    schedule="$(get_job_config "$job_name" "${config_keys[$i]}")"
+    if [[ -n "$schedule" ]]; then
+      # Suppress output during re-enable, just recreate the timer
+      if create_job_timer "$job_name" "${types[$i]}" "$schedule" >/dev/null 2>&1; then
+        print_info "Recreated timer for ${types[$i]} backup"
+      fi
+    fi
+  done
+
   return 0
 }
 
