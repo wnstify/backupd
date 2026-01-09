@@ -644,6 +644,12 @@ detect_panel_by_service() {
     return 0
   fi
 
+  # FlashPanel
+  if is_service_running "flashpanel" || [[ -f "/root/.flashpanel/agent/flashpanel" ]]; then
+    detect_flashpanel_isolation_mode
+    return 0
+  fi
+
   return 1
 }
 
