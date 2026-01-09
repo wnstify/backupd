@@ -2482,6 +2482,38 @@ cli_job_timers() {
   fi
 }
 
+cli_job_schedule() {
+  local job_name="" backup_type="" schedule=""
+  local show_mode=false disable_mode=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --show|-s) show_mode=true ;;
+      --disable|-d) disable_mode=true ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *)
+        if [[ -z "$job_name" ]]; then
+          job_name="$1"
+        elif [[ -z "$backup_type" ]]; then
+          backup_type="$1"
+        else
+          schedule="$1"
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  # TODO: BACKUPD-010 - Add validation logic
+  # TODO: BACKUPD-011 - Add --show handler
+  # TODO: BACKUPD-012 - Add --disable handler
+  # TODO: BACKUPD-013 - Add timer creation handler
+
+  return 0
+}
+
 cli_job_run() {
   local job_name="" backup_type="all" dry_run=false
 
