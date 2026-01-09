@@ -70,7 +70,9 @@ set_crypto_version() {
   chmod 600 "$algo_file"
 
   # Lock the file
-  chattr +i "$algo_file" 2>/dev/null || true
+  if ! chattr +i "$algo_file" 2>/dev/null; then
+    log_debug "Could not set immutable flag (non-ext filesystem?): $algo_file"
+  fi
 }
 
 # Get best available crypto version for new installations
@@ -113,7 +115,13 @@ get_machine_id() {
   elif [[ -f /var/lib/dbus/machine-id ]]; then
     cat /var/lib/dbus/machine-id
   else
-    echo "$(hostname)$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo 'fallback')"
+    # Persistent fallback - boot_id changes on reboot, breaking encryption
+    local fallback_id_file="/etc/backupd/.machine-id"
+    if [[ ! -f "$fallback_id_file" ]]; then
+      hostname | sha256sum | cut -c1-32 > "$fallback_id_file"
+      chmod 400 "$fallback_id_file"
+    fi
+    cat "$fallback_id_file"
   fi
 }
 
@@ -214,8 +222,16 @@ init_secure_storage() {
   mkdir -p "$secrets_dir"
   chmod 700 "$secrets_dir"
 
-  # Generate salt
-  head -c 64 /dev/urandom | base64 > "$secrets_dir/.s"
+  # Generate salt (atomic write to prevent truncation)
+  local salt_temp
+  salt_temp=$(mktemp "$secrets_dir/.s.XXXXXX")
+  if head -c 64 /dev/urandom | base64 > "$salt_temp" && [[ -s "$salt_temp" ]]; then
+    mv "$salt_temp" "$secrets_dir/.s"
+  else
+    rm -f "$salt_temp"
+    print_error "Failed to generate salt file"
+    return 1
+  fi
   chmod 600 "$secrets_dir/.s"
 
   # Set best available crypto version
@@ -248,8 +264,12 @@ store_secret() {
   printf '%s' "$secret_value" | openssl enc -aes-256-cbc -pbkdf2 -iter "$iterations" -salt -pass "pass:$key" -base64 > "$secrets_dir/$secret_name"
 
   chmod 600 "$secrets_dir/$secret_name"
-  chattr +i "$secrets_dir/$secret_name" 2>/dev/null || true
-  chattr +i "$secrets_dir" 2>/dev/null || true
+  if ! chattr +i "$secrets_dir/$secret_name" 2>/dev/null; then
+    log_debug "Could not set immutable flag (non-ext filesystem?): $secrets_dir/$secret_name"
+  fi
+  if ! chattr +i "$secrets_dir" 2>/dev/null; then
+    log_debug "Could not set immutable flag (non-ext filesystem?): $secrets_dir"
+  fi
 }
 
 get_secret() {
@@ -306,7 +326,9 @@ store_secret_with_version() {
   printf '%s' "$secret_value" | openssl enc -aes-256-cbc -pbkdf2 -iter "$iterations" -salt -pass "pass:$key" -base64 > "$secrets_dir/$secret_name"
 
   chmod 600 "$secrets_dir/$secret_name"
-  chattr +i "$secrets_dir/$secret_name" 2>/dev/null || true
+  if ! chattr +i "$secrets_dir/$secret_name" 2>/dev/null; then
+    log_debug "Could not set immutable flag (non-ext filesystem?): $secrets_dir/$secret_name"
+  fi
 }
 
 secret_exists() {
@@ -319,9 +341,15 @@ lock_secrets() {
   local secrets_dir="$1"
   local secret_files=(".s" ".c1" ".c2" ".c3" ".c4" ".c5" ".c6" ".c7" ".c8" ".c9" ".algo")
   for f in "${secret_files[@]}"; do
-    [[ -f "$secrets_dir/$f" ]] && chattr +i "$secrets_dir/$f" 2>/dev/null || true
+    if [[ -f "$secrets_dir/$f" ]]; then
+      if ! chattr +i "$secrets_dir/$f" 2>/dev/null; then
+        log_debug "Could not set immutable flag (non-ext filesystem?): $secrets_dir/$f"
+      fi
+    fi
   done
-  chattr +i "$secrets_dir" 2>/dev/null || true
+  if ! chattr +i "$secrets_dir" 2>/dev/null; then
+    log_debug "Could not set immutable flag (non-ext filesystem?): $secrets_dir"
+  fi
 }
 
 unlock_secrets() {
