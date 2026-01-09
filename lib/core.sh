@@ -587,6 +587,8 @@ declare -A PANEL_DEFINITIONS=(
   ["cyberpanel"]="CyberPanel|/home/*/public_html|.|service"
   ["aapanel"]="aaPanel|/www/wwwroot/*|.|service"
   ["hestia"]="HestiaCP|/home/*/web/*/public_html|public_html|service"
+  ["flashpanel"]="FlashPanel|/home/flashpanel/*|.|service"
+  ["flashpanel-isolated"]="FlashPanel (Isolated)|/home/*/*|.|service"
   ["virtualmin"]="Virtualmin|/home/*/public_html|.|file"
   ["custom"]="Custom|/var/www/*|.|none"
 )
