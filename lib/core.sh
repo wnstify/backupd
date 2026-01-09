@@ -402,20 +402,63 @@ check_disk_space() {
   return 0
 }
 
-# Check network connectivity
+# Check network connectivity (supports curl/wget fallback)
+# BACKUPD-007 FIX: Add wget fallback for systems without curl
 check_network() {
   local host="${1:-1.1.1.1}"
   local timeout="${2:-5}"
 
   # Try curl first (ICMP often blocked on servers)
-  if ! curl -s --connect-timeout "$timeout" "https://www.google.com" &>/dev/null; then
-    if ! ping -c 1 -W "$timeout" "$host" &>/dev/null; then
-      print_error "No network connectivity"
-      return 1
+  if command -v curl &>/dev/null; then
+    if curl -s --connect-timeout "$timeout" "https://www.google.com" &>/dev/null; then
+      return 0
+    fi
+  elif command -v wget &>/dev/null; then
+    if wget -q --timeout="$timeout" -O /dev/null "https://www.google.com" 2>/dev/null; then
+      return 0
     fi
   fi
 
+  # Fallback to ping
+  if ! ping -c 1 -W "$timeout" "$host" &>/dev/null; then
+    print_error "No network connectivity"
+    return 1
+  fi
+
   return 0
+}
+
+# Download file with curl/wget fallback
+# Usage: download_to_file URL OUTPUT_FILE [TIMEOUT]
+# BACKUPD-007 FIX: Support both curl and wget for maximum compatibility
+download_to_file() {
+  local url="$1"
+  local output="$2"
+  local timeout="${3:-30}"
+
+  if command -v curl &>/dev/null; then
+    curl -sfL --proto '=https' --connect-timeout 10 --max-time "$timeout" "$url" -o "$output" 2>/dev/null
+  elif command -v wget &>/dev/null; then
+    wget -q --timeout="$timeout" -O "$output" "$url" 2>/dev/null
+  else
+    return 1
+  fi
+}
+
+# Fetch URL content to stdout with curl/wget fallback
+# Usage: fetch_url URL [TIMEOUT]
+# BACKUPD-007 FIX: Support both curl and wget for maximum compatibility
+fetch_url() {
+  local url="$1"
+  local timeout="${2:-10}"
+
+  if command -v curl &>/dev/null; then
+    curl -sfL --proto '=https' --connect-timeout 10 --max-time "$timeout" "$url" 2>/dev/null
+  elif command -v wget &>/dev/null; then
+    wget -q --timeout="$timeout" -O - "$url" 2>/dev/null
+  else
+    return 1
+  fi
 }
 
 # ---------- MySQL Helper Functions ----------
@@ -807,10 +850,9 @@ install_rclone_verified() {
       ;;
   esac
 
-  # Get latest version from GitHub API
+  # Get latest version from GitHub API (uses fetch_url for curl/wget fallback)
   local latest_version
-  latest_version=$(curl -sfL --proto '=https' --connect-timeout 10 \
-    "https://api.github.com/repos/rclone/rclone/releases/latest" 2>/dev/null | \
+  latest_version=$(fetch_url "https://api.github.com/repos/rclone/rclone/releases/latest" 10 | \
     grep '"tag_name"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/')
 
   if [[ -z "$latest_version" ]]; then
@@ -829,10 +871,9 @@ install_rclone_verified() {
   temp_dir=$(mktemp -d)
   trap "rm -rf '$temp_dir'" RETURN
 
-  # Download the archive
+  # Download the archive (uses download_to_file for curl/wget fallback)
   echo "  Downloading ${filename}..."
-  if ! curl -sfL --proto '=https' --connect-timeout 10 --max-time 300 \
-    "$download_url" -o "${temp_dir}/${filename}" 2>/dev/null; then
+  if ! download_to_file "$download_url" "${temp_dir}/${filename}" 300; then
     print_error "Failed to download rclone"
     return 1
   fi
@@ -843,10 +884,9 @@ install_rclone_verified() {
     return 1
   fi
 
-  # Download checksum file
+  # Download checksum file (uses download_to_file for curl/wget fallback)
   echo "  Verifying checksum..."
-  if ! curl -sfL --proto '=https' --connect-timeout 10 \
-    "$checksum_url" -o "${temp_dir}/SHA256SUMS" 2>/dev/null; then
+  if ! download_to_file "$checksum_url" "${temp_dir}/SHA256SUMS" 60; then
     print_error "Could not download checksum file"
     print_error "Aborting - install rclone manually for security"
     return 1

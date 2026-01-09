@@ -21,22 +21,64 @@ get_update_cache_file() {
 
 UPDATE_CHECK_INTERVAL=$((24 * 60))  # 24 hours in minutes
 
-# Retry wrapper for curl commands (handles transient network failures)
+# Retry wrapper for curl commands with wget fallback (handles transient network failures)
 # BUG-012 FIX: Add retry logic to downloads
+# BACKUPD-007 FIX: Add wget fallback for systems without curl
 curl_with_retry() {
   local max_retries=3
   local retry=0
   local delay=2
 
-  while ((retry < max_retries)); do
-    if curl "$@"; then
-      return 0
+  # Try curl first if available
+  if command -v curl &>/dev/null; then
+    while ((retry < max_retries)); do
+      if curl "$@"; then
+        return 0
+      fi
+      ((retry++))
+      if ((retry < max_retries)); then
+        sleep $((delay * retry))
+      fi
+    done
+  fi
+
+  # Fallback to wget if curl failed or unavailable
+  if command -v wget &>/dev/null; then
+    # Convert curl args to wget: extract URL and output file
+    local url="" output="" args=("$@")
+    local i=0
+    while ((i < ${#args[@]})); do
+      case "${args[i]}" in
+        -o) ((i++)); output="${args[i]}" ;;
+        -s|-f|-L|--proto=*|--proto|--tlsv1.2|--connect-timeout|--max-time)
+          # Skip curl-specific flags
+          [[ "${args[i]}" == "--proto" || "${args[i]}" == "--connect-timeout" || "${args[i]}" == "--max-time" ]] && ((i++))
+          ;;
+        http://*|https://*) url="${args[i]}" ;;
+      esac
+      ((i++))
+    done
+
+    if [[ -n "$url" ]]; then
+      retry=0
+      while ((retry < max_retries)); do
+        if [[ -n "$output" ]]; then
+          if wget -q --timeout=30 -O "$output" "$url" 2>/dev/null; then
+            return 0
+          fi
+        else
+          if wget -q --timeout=30 -O - "$url" 2>/dev/null; then
+            return 0
+          fi
+        fi
+        ((retry++))
+        if ((retry < max_retries)); then
+          sleep $((delay * retry))
+        fi
+      done
     fi
-    ((retry++))
-    if ((retry < max_retries)); then
-      sleep $((delay * retry))
-    fi
-  done
+  fi
+
   return 1
 }
 
@@ -98,6 +140,7 @@ is_update_available() {
 # ---------- Update Check Functions ----------
 
 # Check GitHub for latest version
+# BACKUPD-007 FIX: Add wget fallback for systems without curl
 get_latest_version() {
   local latest=""
   local response=""
@@ -105,19 +148,22 @@ get_latest_version() {
   # Try to get latest release from GitHub API
   # BUG-009 FIX: Add --tlsv1.2 to enforce minimum TLS version
   if command -v curl &>/dev/null; then
-    if ! response=$(curl -s --proto '=https' --tlsv1.2 --connect-timeout 5 "$GITHUB_API_URL" 2>/dev/null); then
-      # BUG-018 FIX: Log failure for debugging
-      log_debug "Failed to fetch latest version from GitHub API" 2>/dev/null || true
-      echo ""
-      return 1
-    fi
+    response=$(curl -s --proto '=https' --tlsv1.2 --connect-timeout 5 "$GITHUB_API_URL" 2>/dev/null) || true
+  elif command -v wget &>/dev/null; then
+    response=$(wget -q --timeout=5 -O - "$GITHUB_API_URL" 2>/dev/null) || true
+  fi
 
-    # BUG-013 FIX: Use jq for robust JSON parsing if available, fallback to grep/sed
-    if command -v jq &>/dev/null; then
-      latest=$(echo "$response" | jq -r '.tag_name // empty' 2>/dev/null)
-    else
-      latest=$(echo "$response" | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-    fi
+  if [[ -z "$response" ]]; then
+    log_debug "Failed to fetch latest version from GitHub API" 2>/dev/null || true
+    echo ""
+    return 1
+  fi
+
+  # BUG-013 FIX: Use jq for robust JSON parsing if available, fallback to grep/sed
+  if command -v jq &>/dev/null; then
+    latest=$(echo "$response" | jq -r '.tag_name // empty' 2>/dev/null)
+  else
+    latest=$(echo "$response" | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
   fi
 
   # Remove 'v' prefix if present

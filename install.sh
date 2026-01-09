@@ -255,7 +255,8 @@ check_system() {
     fi
 
     # Check required commands (v3.0: gpg removed - restic handles encryption)
-    local required_cmds=("bash" "openssl" "tar" "systemctl")
+    # sha256sum and base64 required for checksum verification and crypto operations
+    local required_cmds=("bash" "openssl" "tar" "sha256sum" "base64")
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
             echo -e "${RED}Error: Required command '$cmd' not found${NC}"
@@ -271,9 +272,9 @@ check_system() {
     fi
     echo -e "  Download tool: ${GREEN}OK${NC}"
 
-    # Check systemd
-    if ! pidof systemd &> /dev/null; then
-        echo -e "${YELLOW}Warning: systemd not detected. Timers may not work.${NC}"
+    # Check systemd and systemctl
+    if ! command -v systemctl &> /dev/null || ! pidof systemd &> /dev/null; then
+        echo -e "${YELLOW}Warning: systemd/systemctl not detected. Scheduled backups may not work.${NC}"
     else
         echo -e "  systemd: ${GREEN}OK${NC}"
     fi
