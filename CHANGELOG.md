@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.0] - 2026-01-09
+
+### Added
+
+- **FlashPanel Support** — Full auto-detection support for FlashPanel hosting control panel
+  - Non-isolated mode: `/home/flashpanel/{site}` — all sites under single flashpanel user
+  - Isolated mode: `/home/{user}/{site}` — each site has its own system user
+  - Automatic mode detection based on `/home/flashpanel/` directory presence
+  - Service detection via `flashpanel.service` or `/root/.flashpanel/agent/flashpanel` binary
+  - Panel selection menu options for manual mode selection
+  - Mode override prompt during setup for edge cases
+
+- **Panel Detection Enhancements**
+  - `detect_flashpanel_isolation_mode()` — New helper function to detect FlashPanel isolation mode
+  - FlashPanel service detection in `detect_panel_by_service()` with binary fallback
+  - Interactive mode switching when FlashPanel is detected
+
+- **Comprehensive Supported Panels Documentation**
+  - New "Supported Panels" section in USAGE.md with complete panel reference
+  - Table of all 14 supported panels with directory patterns and detection methods
+  - Dedicated FlashPanel Support subsection with mode explanations and examples
+
+### Changed
+
+- **Panel Selection Menu** — Added FlashPanel (standard) and FlashPanel (isolated) options
+  - Menu options 12 and 13 for FlashPanel modes
+  - Shifted Virtualmin to option 14, Custom path to option 15
+  - Updated case statement mappings
+
+- **Setup Wizard** — Enhanced FlashPanel handling
+  - Shows detected isolation mode with path pattern
+  - Prompts user to confirm or switch modes
+  - Clear messaging: "FlashPanel detected (non-isolated mode)" or "(isolated mode)"
+
+### Technical
+
+- **Modified Files:**
+  - `lib/core.sh` — Added `flashpanel` and `flashpanel-isolated` to PANEL_DEFINITIONS array
+  - `lib/core.sh` — Added `detect_flashpanel_isolation_mode()` function (lines 702-712)
+  - `lib/core.sh` — Added FlashPanel detection block in `detect_panel_by_service()` (lines 647-651)
+  - `lib/setup.sh` — Added FlashPanel menu options and mode override prompt
+  - `USAGE.md` — Added Supported Panels section with FlashPanel documentation
+  - `README.md` — Added FlashPanel to multi-panel support list
+
+- **Panel Definitions Added:**
+  | Panel Key | Display Name | Path Pattern | Webroot | Detection |
+  |-----------|--------------|--------------|---------|-----------|
+  | `flashpanel` | FlashPanel | `/home/flashpanel/*` | `.` | Service |
+  | `flashpanel-isolated` | FlashPanel (Isolated) | `/home/*/*` | `.` | Service |
+
+- **Detection Logic:**
+  - Primary: `is_service_running "flashpanel"` checks for flashpanel.service
+  - Fallback: `[[ -f "/root/.flashpanel/agent/flashpanel" ]]` checks for agent binary
+  - Isolation mode: `detect_flashpanel_isolation_mode()` returns appropriate panel key
+
+---
+
 ## [3.1.4] - 2026-01-09
 
 ### Added
@@ -1317,6 +1374,9 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.2.0 | 2026-01-09 | **FlashPanel support** with auto-detection, isolation modes, mode override |
+| 3.1.4 | 2026-01-09 | Multi-distribution package manager support (6 distros), wget fallback |
+| 3.1.3 | 2026-01-09 | 19 bug fixes across logging, crypto, core, CLI modules |
 | 3.1.2 | 2026-01-08 | Security & reliability fixes for updater (18 bugs) |
 | 3.1.1 | 2026-01-07 | Fix installer missing v3.1.0 lib modules |
 | 3.1.0 | 2026-01-07 | Multi-job support, job CLI commands, backup history command, automatic migration |
