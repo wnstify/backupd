@@ -477,6 +477,43 @@ validate_schedule_format() {
   return 0
 }
 
+# Check for schedule conflicts across jobs
+# Usage: check_schedule_conflicts "production" "db" "*-*-* 02:00:00"
+# Returns: 0 always (advisory only, does not block)
+# Outputs warnings to stderr if conflicts found
+check_schedule_conflicts() {
+  local job_name="$1"
+  local backup_type="$2"
+  local schedule="$3"
+
+  # Get the config key for this backup type
+  local config_key
+  case "$backup_type" in
+    db) config_key="SCHEDULE_DB" ;;
+    files) config_key="SCHEDULE_FILES" ;;
+    verify) config_key="SCHEDULE_VERIFY" ;;
+    verify-full) config_key="SCHEDULE_VERIFY_FULL" ;;
+    *) return 0 ;;  # Unknown type, skip check
+  esac
+
+  # Loop through all jobs looking for conflicts
+  local other_job other_schedule
+  while IFS= read -r other_job; do
+    # Skip the current job being configured
+    [[ "$other_job" == "$job_name" ]] && continue
+
+    # Get the schedule for the same backup type in the other job
+    other_schedule=$(get_job_config "$other_job" "$config_key")
+
+    # Check for exact string match (same type, same schedule)
+    if [[ -n "$other_schedule" && "$other_schedule" == "$schedule" ]]; then
+      echo "Warning: Job '$other_job' also has $backup_type backup at $schedule" >&2
+    fi
+  done < <(list_jobs)
+
+  return 0
+}
+
 # Create systemd timer for a job
 # Usage: create_job_timer "production" "db" "*-*-* 02:00:00"
 create_job_timer() {
