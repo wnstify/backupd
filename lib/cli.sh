@@ -1262,7 +1262,11 @@ cli_schedule_templates_show() {
     }
   fi
 
-  local template="${SCHEDULE_TEMPLATES[$name]}"
+  # Check if template exists (safe for set -u)
+  local template=""
+  if [[ -v "SCHEDULE_TEMPLATES[$name]" ]]; then
+    template="${SCHEDULE_TEMPLATES[$name]}"
+  fi
   if [[ -z "$template" ]]; then
     print_error "Template '$name' not found"
     echo "Use 'backupd schedule templates list' to see available templates"
