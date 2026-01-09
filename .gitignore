@@ -75,6 +75,9 @@ dev/
 .dev/
 sandbox/
 scratch/
+.audit/
+scripts/ralph/
+tasks/
 
 # ----- Distribution -----
 dist/
