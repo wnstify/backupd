@@ -2685,7 +2685,28 @@ cli_job_schedule() {
   # Redirect create_job_timer output when JSON mode
   if is_json_output; then
     if create_job_timer "$job_name" "$backup_type" "$schedule" >/dev/null 2>&1; then
-      echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\"}"
+      # BACKUPD-022: Check for schedule conflicts and capture warnings
+      local conflict_warnings
+      conflict_warnings=$(check_schedule_conflicts "$job_name" "$backup_type" "$schedule" 2>&1)
+
+      if [[ -n "$conflict_warnings" ]]; then
+        # Build JSON array from warnings
+        local warnings_json="["
+        local first=true
+        while IFS= read -r warning_line; do
+          if [[ "$first" == "true" ]]; then
+            first=false
+          else
+            warnings_json+=","
+          fi
+          # Escape the warning message for JSON
+          warnings_json+="\"$warning_line\""
+        done <<< "$conflict_warnings"
+        warnings_json+="]"
+        echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\", \"warnings\": $warnings_json}"
+      else
+        echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\"}"
+      fi
       return 0
     else
       echo "{\"error\": \"Failed to create timer\", \"job\": \"$job_name\", \"backup_type\": \"$backup_type\"}"
@@ -2696,6 +2717,8 @@ cli_job_schedule() {
       print_error "Failed to create timer for $job_name $backup_type"
       return 5
     fi
+    # BACKUPD-022: Check for schedule conflicts (warnings go to stderr)
+    check_schedule_conflicts "$job_name" "$backup_type" "$schedule"
     # create_job_timer already prints success message
     return 0
   fi
