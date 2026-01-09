@@ -2671,6 +2671,20 @@ cli_job_schedule() {
 
   # BACKUPD-023/034: Handle --all flag for bulk operations
   if [[ "$all_mode" == true ]]; then
+    # BACKUPD-034: When --all is used, positional args shift:
+    # job_name becomes backup_type, backup_type becomes schedule
+    # This is because --all doesn't need a job_name
+    if [[ -n "$job_name" && -z "$backup_type" ]]; then
+      # Only job_name is set: treat it as backup_type (for --all <type> --disable)
+      backup_type="$job_name"
+      job_name=""
+    elif [[ -n "$job_name" && -n "$backup_type" ]]; then
+      # Both are set: shift them (for --all <type> <schedule>)
+      schedule="$backup_type"
+      backup_type="$job_name"
+      job_name=""
+    fi
+
     # BACKUPD-034: Determine operation mode based on arguments
     # SHOW mode: --all (no backup_type, no schedule, no disable)
     # SET mode:  --all <backup_type> <schedule>
@@ -2716,9 +2730,8 @@ cli_job_schedule() {
         return $EXIT_NOPERM
       fi
 
-      local results success_count=0 fail_count=0
-      results=$(create_all_job_schedules "$backup_type" "$schedule" 2>&1)
-      local exit_code=$?
+      local results success_count=0 fail_count=0 exit_code=0
+      results=$(create_all_job_schedules "$backup_type" "$schedule" 2>&1) || exit_code=$?
 
       if is_json_output; then
         local json_results='{"operation": "bulk_schedule_set", "backup_type": "'"$backup_type"'", "schedule": "'"$schedule"'", "results": ['
@@ -2728,7 +2741,11 @@ cli_job_schedule() {
           [[ "$first" == true ]] || json_results+=','
           first=false
           json_results+="{\"job\": \"$j_name\", \"status\": \"$status\"}"
-          [[ "$status" == "success" ]] && ((success_count++)) || ((fail_count++))
+          if [[ "$status" == "success" ]]; then
+            ((success_count++)) || true
+          else
+            ((fail_count++)) || true
+          fi
         done <<< "$results"
         json_results+='], "jobs_succeeded": '"$success_count"', "jobs_failed": '"$fail_count"'}'
         echo "$json_results"
@@ -2739,10 +2756,10 @@ cli_job_schedule() {
           [[ -z "$j_name" ]] && continue
           if [[ "$status" == "success" ]]; then
             print_success "  $j_name: scheduled"
-            ((success_count++))
+            ((success_count++)) || true
           else
             print_error "  $j_name: failed"
-            ((fail_count++))
+            ((fail_count++)) || true
           fi
         done <<< "$results"
         echo
@@ -2775,9 +2792,8 @@ cli_job_schedule() {
         return $EXIT_NOPERM
       fi
 
-      local results success_count=0 fail_count=0
-      results=$(disable_all_job_schedules "$backup_type" 2>&1)
-      local exit_code=$?
+      local results success_count=0 fail_count=0 exit_code=0
+      results=$(disable_all_job_schedules "$backup_type" 2>&1) || exit_code=$?
 
       if is_json_output; then
         local json_results='{"operation": "bulk_schedule_disable", "backup_type": "'"$backup_type"'", "results": ['
@@ -2787,8 +2803,8 @@ cli_job_schedule() {
           [[ "$first" == true ]] || json_results+=','
           first=false
           json_results+="{\"job\": \"$j_name\", \"status\": \"$status\"}"
-          [[ "$status" == "disabled" ]] && ((success_count++))
-          [[ "$status" == "failed" ]] && ((fail_count++))
+          [[ "$status" == "disabled" ]] && { ((success_count++)) || true; }
+          [[ "$status" == "failed" ]] && { ((fail_count++)) || true; }
         done <<< "$results"
         json_results+='], "jobs_disabled": '"$success_count"', "jobs_failed": '"$fail_count"'}'
         echo "$json_results"
@@ -2798,9 +2814,9 @@ cli_job_schedule() {
         while IFS=: read -r j_name status; do
           [[ -z "$j_name" ]] && continue
           case "$status" in
-            disabled) print_success "  $j_name: disabled"; ((success_count++)) ;;
+            disabled) print_success "  $j_name: disabled"; ((success_count++)) || true ;;
             not_configured) print_info "  $j_name: not configured" ;;
-            failed) print_error "  $j_name: failed"; ((fail_count++)) ;;
+            failed) print_error "  $j_name: failed"; ((fail_count++)) || true ;;
           esac
         done <<< "$results"
         echo
