@@ -93,3 +93,19 @@ Iteration: 5
   - Return values from helper functions (like install_restic_verified) are handled gracefully by outer code - return 1 is OK
   - For better UX, show "package not found - please install manually" instead of generic failure messages
 ---
+
+## 2026-01-09 - US-006
+Iteration: 6
+- Verified US-006 already satisfied by US-003 implementation
+- All argon2 error messages already use `get_install_hint argon2`:
+  - `backupd.sh:362` - show_encryption_status() uses $(get_install_hint argon2)
+  - `backupd.sh:395` - do_migrate_encryption() uses $(get_install_hint argon2)
+  - `lib/crypto.sh:377` - migrate_secrets() uses $(get_install_hint argon2)
+- `get_install_hint()` covers all 6 package managers: apt, dnf, yum, pacman, apk, zypper
+- Files changed:
+  - `prd.json` - Marked US-006 as passes: true (implementation verified from US-003)
+- **Learnings for future iterations:**
+  - Related user stories may be satisfied by earlier work - always verify current state before implementing
+  - The split between US-003 and US-006 was artificial - both are about distro-aware argon2 messages
+  - All acceptance criteria verification complete: bash syntax OK, shellcheck warnings are pre-existing, functional test confirmed
+---

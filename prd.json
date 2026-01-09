@@ -73,7 +73,7 @@
       "title": "Error Message Updates",
       "description": "As a user who sees an error about missing argon2, I want the error message to show the correct install command for my distro.",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "backupd.sh error messages detect distro and show correct command",
         "lib/crypto.sh error messages detect distro and show correct command",
