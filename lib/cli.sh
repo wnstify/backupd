@@ -2791,12 +2791,16 @@ Commands:
   run <name> [db|files|all]   Run backup for a specific job
   regenerate <name> | --all   Regenerate backup scripts for job(s)
   timers <name>               Show systemd timers for a job
+  schedule <name> <type> <schedule>
+                              Configure backup schedule for a job
 
 Options:
   --json            Output in JSON format
   --dry-run, -n     Preview what would be executed (for run)
   --force, -f       Force operation (for delete)
   --all, -a         Apply to all jobs (for regenerate)
+  --show, -s        Show current schedule (for schedule)
+  --disable, -d     Disable timer without removing config (for schedule)
   --help, -h        Show this help message
 
 Requires: Root privileges for create/delete/enable/disable/regenerate.
@@ -2823,6 +2827,11 @@ Examples:
   backupd job regenerate production     # Regenerate scripts
   backupd job regenerate --all          # Regenerate all jobs
   backupd job timers production         # Show job timers
+  backupd job schedule prod db "*-*-* 02:00:00"
+                                        # Set daily 2am database backup
+  backupd job schedule prod --show      # Show all schedules
+  backupd job schedule prod db --disable
+                                        # Disable db timer
 
 After creating a job, configure it with the interactive menu:
   sudo backupd
