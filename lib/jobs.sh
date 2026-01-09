@@ -703,7 +703,7 @@ list_all_job_schedules() {
 
 # BACKUPD-034: Create schedule for all jobs (bulk operation)
 # Usage: create_all_job_schedules "db" "*-*-* 02:00:00"
-# Returns: 0 if all succeed, 1 if any fail
+# Returns: 0 if all succeed, 1 if any fail, 2 if no jobs configured
 # Follows pattern from regenerate_all_job_scripts()
 create_all_job_schedules() {
   local backup_type="$1"
@@ -726,10 +726,23 @@ create_all_job_schedules() {
   local job_name
   local success_count=0
   local fail_count=0
+  local skip_count=0
   local results=()
 
   while IFS= read -r job_name; do
     [[ -z "$job_name" ]] && continue
+
+    # Check if backup script exists for this job/type
+    local scripts_dir script_path
+    scripts_dir="$(get_job_scripts_dir "$job_name")"
+    script_path="$scripts_dir/${backup_type}_backup.sh"
+
+    if [[ ! -f "$script_path" ]]; then
+      # Job doesn't have this backup type configured - skip it
+      ((skip_count++)) || true
+      results+=("$job_name:skipped")
+      continue
+    fi
 
     if create_job_timer "$job_name" "$backup_type" "$schedule" >/dev/null 2>&1; then
       ((success_count++)) || true
@@ -746,7 +759,7 @@ create_all_job_schedules() {
   if [[ $fail_count -gt 0 ]]; then
     return 1
   elif [[ $success_count -eq 0 ]]; then
-    return 2  # No jobs found
+    return 2  # No jobs configured for this backup type
   fi
 
   return 0

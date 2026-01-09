@@ -2733,6 +2733,7 @@ cli_job_schedule() {
       local results success_count=0 fail_count=0 exit_code=0
       results=$(create_all_job_schedules "$backup_type" "$schedule" 2>&1) || exit_code=$?
 
+      local skip_count=0
       if is_json_output; then
         local json_results='{"operation": "bulk_schedule_set", "backup_type": "'"$backup_type"'", "schedule": "'"$schedule"'", "results": ['
         local first=true
@@ -2741,26 +2742,33 @@ cli_job_schedule() {
           [[ "$first" == true ]] || json_results+=','
           first=false
           json_results+="{\"job\": \"$j_name\", \"status\": \"$status\"}"
-          if [[ "$status" == "success" ]]; then
-            ((success_count++)) || true
-          else
-            ((fail_count++)) || true
-          fi
+          case "$status" in
+            success) ((success_count++)) || true ;;
+            skipped) ((skip_count++)) || true ;;
+            *) ((fail_count++)) || true ;;
+          esac
         done <<< "$results"
-        json_results+='], "jobs_succeeded": '"$success_count"', "jobs_failed": '"$fail_count"'}'
+        json_results+='], "jobs_succeeded": '"$success_count"', "jobs_skipped": '"$skip_count"', "jobs_failed": '"$fail_count"'}'
         echo "$json_results"
       else
         print_info "Setting $backup_type schedule to '$schedule' for all jobs..."
         echo
         while IFS=: read -r j_name status; do
           [[ -z "$j_name" ]] && continue
-          if [[ "$status" == "success" ]]; then
-            print_success "  $j_name: scheduled"
-            ((success_count++)) || true
-          else
-            print_error "  $j_name: failed"
-            ((fail_count++)) || true
-          fi
+          case "$status" in
+            success)
+              print_success "  $j_name: scheduled"
+              ((success_count++)) || true
+              ;;
+            skipped)
+              print_info "  $j_name: not configured"
+              ((skip_count++)) || true
+              ;;
+            *)
+              print_error "  $j_name: failed"
+              ((fail_count++)) || true
+              ;;
+          esac
         done <<< "$results"
         echo
         if [[ $fail_count -gt 0 ]]; then
@@ -2768,7 +2776,7 @@ cli_job_schedule() {
         elif [[ $success_count -gt 0 ]]; then
           print_success "Summary: $success_count job(s) scheduled"
         else
-          print_info "No jobs configured"
+          print_info "No jobs configured for $backup_type backup"
         fi
       fi
       return $exit_code
