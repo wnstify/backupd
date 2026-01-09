@@ -199,6 +199,29 @@ run_setup() {
         ;;
     esac
 
+    # FlashPanel mode override prompt
+    if [[ "$PANEL_KEY" == "flashpanel" || "$PANEL_KEY" == "flashpanel-isolated" ]]; then
+      echo
+      if [[ "$PANEL_KEY" == "flashpanel" ]]; then
+        echo -e "${GREEN}FlashPanel detected (non-isolated mode)${NC}"
+        echo "Sites are stored in: /home/flashpanel/{site}"
+      else
+        echo -e "${GREEN}FlashPanel detected (isolated mode)${NC}"
+        echo "Sites are stored in: /home/{user}/{site}"
+      fi
+      echo
+      read -p "Press Enter to confirm, or type 'switch' to change mode: " flashpanel_mode_choice
+      if [[ "$flashpanel_mode_choice" == "switch" ]]; then
+        if [[ "$PANEL_KEY" == "flashpanel" ]]; then
+          PANEL_KEY="flashpanel-isolated"
+          print_info "Switched to FlashPanel (isolated mode)"
+        else
+          PANEL_KEY="flashpanel"
+          print_info "Switched to FlashPanel (non-isolated mode)"
+        fi
+      fi
+    fi
+
     # Get pattern and subdir from panel definition if not custom
     if [[ "$PANEL_CHOICE" != "15" ]]; then
       WEB_PATH_PATTERN="$(get_panel_info "$PANEL_KEY" "pattern")"
