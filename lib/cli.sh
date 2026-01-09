@@ -2603,7 +2603,31 @@ cli_job_schedule() {
     return 0
   fi
 
-  # TODO: BACKUPD-012 - Add --disable handler
+  # BACKUPD-012: Disable timer handler
+  if [[ "$disable_mode" == true ]]; then
+    # backup_type is required for disable
+    if [[ -z "$backup_type" ]]; then
+      print_error "Backup type required for --disable"
+      echo "Usage: backupd job schedule <job_name> <backup_type> --disable"
+      return 2
+    fi
+
+    local timer_name
+    timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
+
+    # Stop and disable the timer (does NOT clear config)
+    systemctl stop "$timer_name" 2>/dev/null || true
+    systemctl disable "$timer_name" 2>/dev/null || true
+
+    if is_json_output; then
+      echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"status\": \"disabled\"}"
+    else
+      print_success "Timer '$timer_name' disabled"
+      echo "Note: Schedule config preserved. Use 'backupd job schedule $job_name --show' to view."
+    fi
+    return 0
+  fi
+
   # TODO: BACKUPD-013 - Add timer creation handler
 
   return 0
