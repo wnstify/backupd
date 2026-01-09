@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.3] - 2026-01-09
+
+### Fixed
+
+- **Function stack validation** - Log mismatch when function exit doesn't match expected name (BUG-LOG-001)
+- **Password redaction** - Enhanced regex for quoted passwords with spaces (BUG-LOG-002)
+- **Session ID precision** - Added subsecond precision to debug session IDs (BUG-LOG-004)
+- **Path validation** - Allow bracket characters in file paths (BUG-CORE-005)
+- **Network check order** - Try curl before ICMP ping (often blocked) (BUG-CORE-001)
+- **Disk space warnings** - Improved logging when df parsing fails (BUG-CORE-004)
+- **Bash-specific docs** - Document compgen usage requirement (BUG-CORE-003)
+- **chattr logging** - Log debug message when immutable flag fails (BUG-CRYPTO-002)
+- **Salt file atomicity** - Use atomic write for salt generation (BUG-CRYPTO-004)
+- **Machine ID persistence** - Create persistent fallback when /etc/machine-id missing (BUG-CRYPTO-003)
+- **sed escaping** - Escape special characters in sed replacements (BUG-GEN-002)
+- **INSTALL_DIR placeholder** - Use placeholder instead of hardcoded path (BUG-GEN-003)
+- **JSON escaping** - Escape special chars in history JSON fields (BUG-VERIFY-004)
+- **Cross-platform dates** - Python fallback for GNU date -d (BUG-VERIFY-002, BUG-BACKUP-001)
+- **History rotation lock** - Add flock to prevent race conditions (BUG-VERIFY-003)
+- **Restore cleanup trap** - Clean temp files on interrupt (BUG-BACKUP-003)
+- **Error output sanitization** - Capture restic errors to variable (BUG-BACKUP-005)
+- **Empty schedule display** - Show "(unknown)" for missing schedules (BUG-SCHEDULE-001)
+- **Cron removal pattern** - More precise grep pattern (BUG-SCHEDULE-002)
+- **Schedule documentation** - Document RandomizedDelaySec behavior (BUG-SCHEDULE-003)
+- **Service regeneration** - Always regenerate service files (BUG-SCHEDULE-004)
+- **Temp file cleanup** - Add trap for backup temp files (BUG-CLI-001)
+- **Argument validation** - Validate --backup-id has value (BUG-CLI-002)
+- **Array re-declaration** - Unset before re-declaring associative arrays (BUG-CLI-004)
+- **Symlink verification** - Check symlink target before reinstalling (BUG-CORE-002)
+
+### Breaking Changes
+
+- **verify command** - Removed `-q` shortcut; use `--quick` instead (BUG-CLI-003)
+
+---
+
 ## [3.1.2] - 2026-01-08
 
 ### Fixed
