@@ -120,10 +120,12 @@ run_setup() {
     echo "  9) CyberPanel   /home/*/public_html"
     echo " 10) aaPanel      /www/wwwroot/*"
     echo " 11) HestiaCP     /home/*/web/*/public_html"
-    echo " 12) Virtualmin   /home/*/public_html"
-    echo " 13) Custom path"
+    echo " 12) FlashPanel   /home/flashpanel/*"
+    echo " 13) FlashPanel (isolated) /home/*/*"
+    echo " 14) Virtualmin   /home/*/public_html"
+    echo " 15) Custom path"
     echo
-    read -p "Select option [1-13] (default: 1): " PANEL_CHOICE
+    read -p "Select option [1-15] (default: 1): " PANEL_CHOICE
     PANEL_CHOICE=${PANEL_CHOICE:-1}
 
     case "$PANEL_CHOICE" in
@@ -140,8 +142,10 @@ run_setup() {
       9) PANEL_KEY="cyberpanel" ;;
       10) PANEL_KEY="aapanel" ;;
       11) PANEL_KEY="hestia" ;;
-      12) PANEL_KEY="virtualmin" ;;
-      13)
+      12) PANEL_KEY="flashpanel" ;;
+      13) PANEL_KEY="flashpanel-isolated" ;;
+      14) PANEL_KEY="virtualmin" ;;
+      15)
         PANEL_KEY="custom"
         echo
         echo "Enter custom path pattern. Use * as wildcard for user/site directories."
@@ -196,7 +200,7 @@ run_setup() {
     esac
 
     # Get pattern and subdir from panel definition if not custom
-    if [[ "$PANEL_CHOICE" != "13" ]]; then
+    if [[ "$PANEL_CHOICE" != "15" ]]; then
       WEB_PATH_PATTERN="$(get_panel_info "$PANEL_KEY" "pattern")"
       WEBROOT_SUBDIR="$(get_panel_info "$PANEL_KEY" "webroot_subdir")"
     fi
