@@ -19,15 +19,25 @@ record_history() {
   local job_name="${JOB_NAME:-default}"
   local hostname="${HOSTNAME:-$(hostname -f 2>/dev/null || hostname)}"
 
-  # Calculate duration
+  # Calculate duration (cross-platform date parsing)
+  get_epoch() {
+    local ts="$1"
+    date -d "$ts" +%s 2>/dev/null || \
+    python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('$ts'.replace('Z','+00:00')).timestamp()))" 2>/dev/null || \
+    echo 0
+  }
   local start_epoch end_epoch duration_seconds
-  start_epoch=$(date -d "$started_at" +%s 2>/dev/null || echo 0)
-  end_epoch=$(date -d "$ended_at" +%s 2>/dev/null || echo 0)
+  start_epoch=$(get_epoch "$started_at")
+  end_epoch=$(get_epoch "$ended_at")
   duration_seconds=$((end_epoch - start_epoch))
   [[ $duration_seconds -lt 0 ]] && duration_seconds=0
 
-  # Escape error for JSON
-  error="${error//\\/\\\\}"; error="${error//\"/\\\"}"; error="${error//$'\n'/\\n}"
+  # Escape all JSON string values
+  escape_json() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; echo "$s"; }
+  job_name=$(escape_json "$job_name")
+  snapshot_id=$(escape_json "$snapshot_id")
+  hostname=$(escape_json "$hostname")
+  error=$(escape_json "$error")
 
   # Create JSON record (includes job_name for multi-job tracking)
   local record="{\"id\":\"$job_id\",\"job\":\"$job_name\",\"type\":\"$type\",\"status\":\"$status\",\"started_at\":\"$started_at\",\"ended_at\":\"$ended_at\",\"duration_seconds\":$duration_seconds,\"snapshot_id\":\"$snapshot_id\",\"items_count\":$items_count,\"items_failed\":$items_failed,\"error\":\"$error\",\"hostname\":\"$hostname\"}"
@@ -70,15 +80,18 @@ get_history() {
   echo "]"
 }
 
-# Rotate history to keep max records
+# Rotate history to keep max records (with flock to prevent race condition)
 rotate_history() {
   [[ ! -f "$HISTORY_FILE" ]] && return 0
-  local count=$(wc -l < "$HISTORY_FILE" 2>/dev/null || echo 0)
-  if [[ $count -gt $HISTORY_MAX_RECORDS ]]; then
-    tail -n "$HISTORY_MAX_RECORDS" "$HISTORY_FILE" > "${HISTORY_FILE}.tmp"
-    mv "${HISTORY_FILE}.tmp" "$HISTORY_FILE"
-    chmod 600 "$HISTORY_FILE" 2>/dev/null || true
-  fi
+  (
+    flock -n 9 || return 0
+    local count=$(wc -l < "$HISTORY_FILE" 2>/dev/null || echo 0)
+    if [[ $count -gt $HISTORY_MAX_RECORDS ]]; then
+      tail -n "$HISTORY_MAX_RECORDS" "$HISTORY_FILE" > "${HISTORY_FILE}.tmp"
+      mv "${HISTORY_FILE}.tmp" "$HISTORY_FILE"
+      chmod 600 "$HISTORY_FILE" 2>/dev/null || true
+    fi
+  ) 9>"${HISTORY_FILE}.lock"
 }
 
 # Format duration for display (e.g., "2m 15s")

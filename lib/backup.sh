@@ -32,7 +32,14 @@ show_running_backups() {
     if [[ -n "$updated_at" ]]; then
       local now updated_epoch
       now=$(date +%s)
-      updated_epoch=$(date -d "$updated_at" +%s 2>/dev/null || echo 0)
+      # Cross-platform date parsing (GNU date, then Python fallback)
+      if updated_epoch=$(date -d "$updated_at" +%s 2>/dev/null); then
+        : # GNU date worked
+      elif command -v python3 &>/dev/null; then
+        updated_epoch=$(python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('$updated_at'.replace('Z','+00:00')).timestamp()))" 2>/dev/null || echo 0)
+      else
+        updated_epoch=0
+      fi
       if [[ $((now - updated_epoch)) -gt 3600 ]]; then
         continue
       fi
