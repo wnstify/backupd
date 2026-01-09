@@ -17,6 +17,7 @@ run_backup_script() {
 
   # Create temp file for capturing output
   temp_output="$(mktemp)"
+  trap 'rm -f "$temp_output" 2>/dev/null' RETURN EXIT INT TERM
 
   # Run script, capture output (disable pipefail temporarily to capture exit code)
   set +o pipefail
@@ -271,6 +272,10 @@ cli_restore() {
         list_only=1
         ;;
       --backup-id)
+        if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+          print_error "--backup-id requires a value"
+          return $EXIT_USAGE
+        fi
         backup_id="$2"
         shift
         ;;
@@ -673,7 +678,8 @@ cli_verify() {
   # Parse arguments (including global flags that appear after subcommand)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --quick|-q)
+      --quick)
+        # Note: -q shortcut removed (was inconsistent, -q usually means --quiet)
         quick_mode=1
         ;;
       --full|-f)
@@ -847,6 +853,7 @@ cli_verify_quick_json() {
 
   # Check files backups
   if [[ "$backup_type" == "files" || "$backup_type" == "both" ]] && [[ -n "$rclone_files_path" ]]; then
+    unset checksum_files
     declare -A checksum_files=()
     local all_files
     all_files=$(rclone lsl "$rclone_remote:$rclone_files_path" 2>/dev/null) || true
