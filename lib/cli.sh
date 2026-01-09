@@ -1169,6 +1169,9 @@ cli_schedule() {
     disable)
       cli_schedule_disable "$@"
       ;;
+    template|templates)
+      cli_schedule_templates "$@"
+      ;;
     --help|-h)
       cli_schedule_help
       return 0
@@ -1179,6 +1182,110 @@ cli_schedule() {
       return $EXIT_USAGE
       ;;
   esac
+}
+
+# BACKUPD-035: Schedule templates subcommand
+cli_schedule_templates() {
+  local action="${1:-list}"
+  shift || true
+
+  case "$action" in
+    list|ls)
+      cli_schedule_templates_list "$@"
+      ;;
+    show)
+      cli_schedule_templates_show "$@"
+      ;;
+    *)
+      # If action looks like a template name, treat as show
+      if [[ -n "$action" && "$action" != -* ]]; then
+        cli_schedule_templates_show "$action" "$@"
+      else
+        print_error "Unknown templates action: $action"
+        echo "Usage: backupd schedule templates [list|show <name>]"
+        return $EXIT_USAGE
+      fi
+      ;;
+  esac
+}
+
+# BACKUPD-035: List all available schedule templates
+cli_schedule_templates_list() {
+  # Source schedule module if not loaded
+  if ! declare -p SCHEDULE_TEMPLATES &>/dev/null 2>&1; then
+    source "$LIB_DIR/schedule.sh" 2>/dev/null || source "$INSTALL_DIR/lib/schedule.sh" 2>/dev/null || {
+      print_error "Schedule module not found"
+      return 1
+    }
+  fi
+
+  if is_json_output; then
+    local json_output='{"templates": ['
+    local first=true
+    while IFS='|' read -r name oncalendar display description; do
+      [[ "$first" == true ]] || json_output+=','
+      first=false
+      json_output+="{\"name\": \"$name\", \"schedule\": \"$oncalendar\", \"display\": \"$display\", \"description\": \"$description\"}"
+    done < <(list_schedule_templates)
+    json_output+=']}'
+    echo "$json_output"
+  else
+    echo "Available Schedule Templates"
+    echo "============================"
+    echo
+    printf "%-18s %-24s %s\n" "NAME" "SCHEDULE" "DESCRIPTION"
+    printf "%-18s %-24s %s\n" "----" "--------" "-----------"
+    while IFS='|' read -r name oncalendar display description; do
+      printf "%-18s %-24s %s\n" "$name" "$oncalendar" "$description"
+    done < <(list_schedule_templates)
+    echo
+    echo "Usage: backupd job schedule <job> <type> --template <name>"
+    echo "   or: backupd job schedule <job> <type> <schedule>"
+  fi
+}
+
+# BACKUPD-035: Show details of a specific template
+cli_schedule_templates_show() {
+  local name="$1"
+
+  if [[ -z "$name" ]]; then
+    print_error "Template name required"
+    echo "Usage: backupd schedule templates show <name>"
+    return $EXIT_USAGE
+  fi
+
+  # Source schedule module if not loaded
+  if ! declare -p SCHEDULE_TEMPLATES &>/dev/null 2>&1; then
+    source "$LIB_DIR/schedule.sh" 2>/dev/null || source "$INSTALL_DIR/lib/schedule.sh" 2>/dev/null || {
+      print_error "Schedule module not found"
+      return 1
+    }
+  fi
+
+  local template="${SCHEDULE_TEMPLATES[$name]}"
+  if [[ -z "$template" ]]; then
+    print_error "Template '$name' not found"
+    echo "Use 'backupd schedule templates list' to see available templates"
+    return 1
+  fi
+
+  local oncalendar display description
+  IFS='|' read -r oncalendar display description <<< "$template"
+
+  if is_json_output; then
+    echo "{\"name\": \"$name\", \"schedule\": \"$oncalendar\", \"display\": \"$display\", \"description\": \"$description\"}"
+  else
+    echo "Template: $name"
+    echo "==========$(printf '=%.0s' $(seq 1 ${#name}))"
+    echo
+    echo "Display Name: $display"
+    echo "Schedule:     $oncalendar"
+    echo "Description:  $description"
+    echo
+    echo "Example usage:"
+    echo "  backupd job schedule mysite db --template $name"
+    echo "  backupd job schedule mysite files --template $name"
+  fi
 }
 
 cli_schedule_list() {
@@ -2516,6 +2623,7 @@ cli_job_timers() {
 cli_job_schedule() {
   local job_name="" backup_type="" schedule=""
   local show_mode=false disable_mode=false all_mode=false
+  local template_name=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2523,6 +2631,11 @@ cli_job_schedule() {
       --show|-s) show_mode=true ;;
       --disable|-d) disable_mode=true ;;
       --all|-a) all_mode=true ;;
+      --template|-t)
+        # BACKUPD-035: Template support
+        shift
+        template_name="$1"
+        ;;
       --help|-h) cli_job_help; return 0 ;;
       -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
       *)
@@ -2537,6 +2650,24 @@ cli_job_schedule() {
     esac
     shift
   done
+
+  # BACKUPD-035: Resolve template to schedule if specified
+  if [[ -n "$template_name" ]]; then
+    # Source schedule module if not loaded
+    if ! declare -p SCHEDULE_TEMPLATES &>/dev/null 2>&1; then
+      source "$LIB_DIR/schedule.sh" 2>/dev/null || source "$INSTALL_DIR/lib/schedule.sh" 2>/dev/null || {
+        print_error "Schedule module not found"
+        return 1
+      }
+    fi
+
+    schedule=$(get_template_schedule "$template_name")
+    if [[ -z "$schedule" ]]; then
+      print_error "Unknown template: $template_name"
+      echo "Use 'backupd schedule templates list' to see available templates"
+      return 4
+    fi
+  fi
 
   # BACKUPD-023/034: Handle --all flag for bulk operations
   if [[ "$all_mode" == true ]]; then

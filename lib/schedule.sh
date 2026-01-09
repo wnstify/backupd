@@ -4,6 +4,82 @@
 # Backup schedule management functions
 # ============================================================================
 
+# BACKUPD-035: Schedule Templates/Presets
+# Format: TEMPLATE_NAME="oncalendar|display_name|description"
+# These provide consistent, reusable schedule configurations
+
+declare -A SCHEDULE_TEMPLATES=(
+  ["hourly"]="hourly|Hourly|Run every hour"
+  ["every_2h"]="*-*-* 0/2:00:00|Every 2 Hours|Run every 2 hours"
+  ["every_6h"]="*-*-* 0/6:00:00|Every 6 Hours|Run every 6 hours"
+  ["daily_midnight"]="*-*-* 00:00:00|Daily at Midnight|Run every day at midnight"
+  ["daily_1am"]="*-*-* 01:00:00|Daily at 1 AM|Run every day at 1 AM"
+  ["daily_2am"]="*-*-* 02:00:00|Daily at 2 AM|Recommended for backups"
+  ["daily_3am"]="*-*-* 03:00:00|Daily at 3 AM|Good for secondary systems"
+  ["daily_4am"]="*-*-* 04:00:00|Daily at 4 AM|For critical systems"
+  ["weekly_sun_2am"]="Sun *-*-* 02:00:00|Weekly Sunday 2 AM|Run every Sunday at 2 AM"
+  ["weekly_sat_3am"]="Sat *-*-* 03:00:00|Weekly Saturday 3 AM|Run every Saturday at 3 AM"
+  ["biweekly"]="*-*-01,15 02:00:00|Biweekly|Run on 1st and 15th at 2 AM"
+  ["monthly"]="*-*-01 02:00:00|Monthly|Run on 1st of month at 2 AM"
+)
+
+# BACKUPD-035: Get template OnCalendar expression by name
+# Usage: get_template_schedule "daily_2am"
+# Returns: OnCalendar expression or empty if not found
+get_template_schedule() {
+  local name="$1"
+  local template="${SCHEDULE_TEMPLATES[$name]}"
+  [[ -n "$template" ]] && echo "$template" | cut -d'|' -f1
+}
+
+# BACKUPD-035: Get template display name by name
+# Usage: get_template_display "daily_2am"
+# Returns: Display name or empty if not found
+get_template_display() {
+  local name="$1"
+  local template="${SCHEDULE_TEMPLATES[$name]}"
+  [[ -n "$template" ]] && echo "$template" | cut -d'|' -f2
+}
+
+# BACKUPD-035: Get template description by name
+# Usage: get_template_description "daily_2am"
+# Returns: Description or empty if not found
+get_template_description() {
+  local name="$1"
+  local template="${SCHEDULE_TEMPLATES[$name]}"
+  [[ -n "$template" ]] && echo "$template" | cut -d'|' -f3
+}
+
+# BACKUPD-035: Detect template name from OnCalendar expression
+# Usage: detect_template_name "*-*-* 02:00:00"
+# Returns: Template name or empty if no match
+detect_template_name() {
+  local schedule="$1"
+  local name oncalendar
+
+  for name in "${!SCHEDULE_TEMPLATES[@]}"; do
+    oncalendar=$(echo "${SCHEDULE_TEMPLATES[$name]}" | cut -d'|' -f1)
+    if [[ "$oncalendar" == "$schedule" ]]; then
+      echo "$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# BACKUPD-035: List all available templates
+# Usage: list_schedule_templates
+# Output: name|oncalendar|display|description (one per line)
+list_schedule_templates() {
+  local name oncalendar display description
+
+  # Sort template names for consistent output
+  for name in $(echo "${!SCHEDULE_TEMPLATES[@]}" | tr ' ' '\n' | sort); do
+    IFS='|' read -r oncalendar display description <<< "${SCHEDULE_TEMPLATES[$name]}"
+    echo "${name}|${oncalendar}|${display}|${description}"
+  done
+}
+
 # ---------- Manage Schedules ----------
 
 manage_schedules() {
