@@ -693,6 +693,18 @@ detect_panel_by_files() {
   return 1
 }
 
+# Detect FlashPanel isolation mode
+# Returns 'flashpanel' for non-isolated (sites in /home/flashpanel/)
+# Returns 'flashpanel-isolated' for isolated (sites in /home/{user}/)
+detect_flashpanel_isolation_mode() {
+  # Check if /home/flashpanel/ exists and has site subdirectories
+  if [[ -d "/home/flashpanel" ]] && compgen -G "/home/flashpanel/*" >/dev/null 2>&1; then
+    echo "flashpanel"
+  else
+    echo "flashpanel-isolated"
+  fi
+}
+
 # Auto-detect installed panel
 detect_panel() {
   local detected=""
