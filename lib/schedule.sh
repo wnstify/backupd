@@ -97,9 +97,11 @@ manage_schedules() {
     echo "7. Disable quick integrity check schedule"
     echo "8. Enable/disable monthly full verification"
     echo "9. View timer status"
+    echo
+    echo "J. Manage Job Schedules (multi-job)"
     echo "0. Back to main menu"
     echo
-    read -p "Select option [0-9]: " schedule_choice
+    read -p "Select option [0-9, J]: " schedule_choice
 
     case "$schedule_choice" in
       1)
@@ -128,6 +130,9 @@ manage_schedules() {
         ;;
       9)
         view_timer_status
+        ;;
+      [Jj])
+        manage_job_schedules
         ;;
       0|*)
         return
@@ -599,5 +604,271 @@ disable_full_verification_timer() {
     print_info "Monthly full verification remains enabled (good choice!)"
   fi
 
+  press_enter_to_continue
+}
+
+# ---------- Manage Job Schedules (Multi-Job Support) ----------
+
+# Interactive menu to manage schedules for any job
+# Usage: manage_job_schedules
+manage_job_schedules() {
+  while true; do
+    print_header
+    echo "Manage Job Schedules"
+    echo "===================="
+    echo
+
+    if ! is_configured; then
+      print_error "System not configured. Please run setup first."
+      press_enter_to_continue
+      return
+    fi
+
+    # Get list of jobs
+    local jobs=()
+    local job
+    while IFS= read -r job; do
+      [[ -n "$job" ]] && jobs+=("$job")
+    done < <(list_jobs)
+
+    if [[ ${#jobs[@]} -eq 0 ]]; then
+      print_warning "No jobs configured."
+      echo
+      echo "Create a job first:"
+      echo "  backupd job create <name>"
+      echo
+      press_enter_to_continue
+      return
+    fi
+
+    # Display job selection menu
+    echo "Select a job to manage schedules:"
+    echo
+    local i=1
+    for job in "${jobs[@]}"; do
+      echo "  $i. $job"
+      ((i++))
+    done
+    echo
+    echo "  0. Back to schedules menu"
+    echo
+    read -p "Select job [0-${#jobs[@]}]: " job_choice
+
+    # Validate input
+    if [[ "$job_choice" == "0" ]]; then
+      return
+    fi
+
+    if ! [[ "$job_choice" =~ ^[0-9]+$ ]] || [[ "$job_choice" -lt 1 ]] || [[ "$job_choice" -gt ${#jobs[@]} ]]; then
+      print_error "Invalid selection"
+      sleep 1
+      continue
+    fi
+
+    local selected_job="${jobs[$((job_choice-1))]}"
+    manage_job_schedule_types "$selected_job"
+  done
+}
+
+# Submenu for selecting backup type to schedule
+# Usage: manage_job_schedule_types "production"
+manage_job_schedule_types() {
+  local job_name="$1"
+
+  while true; do
+    print_header
+    echo "Job: $job_name - Schedule Management"
+    echo "===================================="
+    echo
+
+    # Show current schedules for this job
+    echo "Current Schedules:"
+    echo
+    local types=("db" "files" "verify" "verify-full")
+    local config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+    local display_names=("Database" "Files" "Quick Verify" "Full Verify")
+
+    local i
+    for i in "${!types[@]}"; do
+      local schedule
+      schedule=$(get_job_config "$job_name" "${config_keys[$i]}")
+      local timer_name
+      timer_name="$(get_timer_name "$job_name" "${types[$i]}")"
+      local status="not scheduled"
+
+      if [[ -n "$schedule" ]]; then
+        if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+          status="active"
+        else
+          status="inactive"
+        fi
+        printf "  %-12s %s (timer: %s)\n" "${display_names[$i]}:" "$schedule" "$status"
+      else
+        printf "  %-12s %s\n" "${display_names[$i]}:" "NOT SCHEDULED"
+      fi
+    done
+
+    echo
+    echo "Select backup type to schedule:"
+    echo
+    echo "  1. Database backup"
+    echo "  2. Files backup"
+    echo "  3. Quick integrity check"
+    echo "  4. Full integrity check"
+    echo
+    echo "  0. Back to job selection"
+    echo
+    read -p "Select option [0-4]: " type_choice
+
+    case "$type_choice" in
+      1) set_job_schedule "$job_name" "db" "Database" ;;
+      2) set_job_schedule "$job_name" "files" "Files" ;;
+      3) set_job_schedule "$job_name" "verify" "Quick Verify" ;;
+      4) set_job_schedule "$job_name" "verify-full" "Full Verify" ;;
+      0) return ;;
+      *) print_error "Invalid option" ; sleep 1 ;;
+    esac
+  done
+}
+
+# Set schedule for a specific job and backup type
+# Usage: set_job_schedule "production" "db" "Database"
+set_job_schedule() {
+  local job_name="$1"
+  local backup_type="$2"
+  local display_name="$3"
+
+  print_header
+  echo "Job: $job_name - Schedule $display_name Backup"
+  echo "=============================================="
+  echo
+
+  # Show current schedule if exists
+  local config_key
+  case "$backup_type" in
+    db) config_key="SCHEDULE_DB" ;;
+    files) config_key="SCHEDULE_FILES" ;;
+    verify) config_key="SCHEDULE_VERIFY" ;;
+    verify-full) config_key="SCHEDULE_VERIFY_FULL" ;;
+  esac
+
+  local current_schedule
+  current_schedule=$(get_job_config "$job_name" "$config_key")
+  if [[ -n "$current_schedule" ]]; then
+    echo "Current schedule: $current_schedule"
+  else
+    echo "Current schedule: NOT SET"
+  fi
+  echo
+
+  echo "Select schedule option:"
+  echo
+  echo "  1. Hourly"
+  echo "  2. Every 2 hours"
+  echo "  3. Every 6 hours"
+  echo "  4. Daily at midnight"
+  echo "  5. Daily at 2 AM (recommended for backups)"
+  echo "  6. Daily at 3 AM"
+  echo "  7. Weekly (Sunday at 2 AM)"
+  echo "  8. Monthly (1st at 2 AM)"
+  echo "  9. Custom schedule"
+  echo
+  echo "  D. Disable schedule"
+  echo "  0. Cancel"
+  echo
+  read -p "Select option [0-9, D]: " sched_choice
+
+  local on_calendar=""
+  case "$sched_choice" in
+    1) on_calendar="hourly" ;;
+    2) on_calendar="*-*-* 0/2:00:00" ;;
+    3) on_calendar="*-*-* 0/6:00:00" ;;
+    4) on_calendar="*-*-* 00:00:00" ;;
+    5) on_calendar="*-*-* 02:00:00" ;;
+    6) on_calendar="*-*-* 03:00:00" ;;
+    7) on_calendar="Sun *-*-* 02:00:00" ;;
+    8) on_calendar="*-*-01 02:00:00" ;;
+    9)
+      echo
+      echo "Enter systemd OnCalendar expression."
+      echo
+      echo "Examples:"
+      echo "  hourly              - Every hour"
+      echo "  daily               - Every day at midnight"
+      echo "  *-*-* 02:00:00      - Every day at 2 AM"
+      echo "  *-*-* 0/6:00:00     - Every 6 hours"
+      echo "  Mon,Fri *-*-* 02:00 - Monday and Friday at 2 AM"
+      echo "  Sun *-*-* 03:00:00  - Every Sunday at 3 AM"
+      echo "  *-*-01 02:00:00     - First day of month at 2 AM"
+      echo
+      read -p "OnCalendar: " on_calendar
+      if [[ -z "$on_calendar" ]]; then
+        print_error "No schedule entered."
+        press_enter_to_continue
+        return
+      fi
+      ;;
+    [Dd])
+      disable_job_schedule "$job_name" "$backup_type" "$display_name"
+      return
+      ;;
+    0)
+      return
+      ;;
+    *)
+      print_error "Invalid option"
+      press_enter_to_continue
+      return
+      ;;
+  esac
+
+  # Validate the schedule format
+  echo
+  if ! validate_schedule_format "$on_calendar" 2>/dev/null; then
+    print_error "Invalid schedule format: $on_calendar"
+    echo
+    echo "Hint: Test with: systemd-analyze calendar '$on_calendar'"
+    press_enter_to_continue
+    return
+  fi
+
+  # Create the timer
+  echo "Creating timer for $job_name $display_name backup..."
+  echo
+  if create_job_timer "$job_name" "$backup_type" "$on_calendar" >/dev/null 2>&1; then
+    print_success "Schedule set: $on_calendar"
+    echo
+    local timer_name
+    timer_name="$(get_timer_name "$job_name" "$backup_type")"
+    print_info "Timer: $timer_name"
+
+    # Check for conflicts (advisory)
+    check_schedule_conflicts "$job_name" "$backup_type" "$on_calendar"
+  else
+    print_error "Failed to create timer"
+    echo
+    print_info "Ensure backup scripts exist: backupd job regenerate $job_name"
+  fi
+
+  press_enter_to_continue
+}
+
+# Disable schedule for a specific job and backup type
+# Usage: disable_job_schedule "production" "db" "Database"
+disable_job_schedule() {
+  local job_name="$1"
+  local backup_type="$2"
+  local display_name="$3"
+
+  local timer_name
+  timer_name="$(get_timer_name "$job_name" "$backup_type")"
+
+  echo
+  echo "Disabling $display_name schedule for job '$job_name'..."
+
+  systemctl stop "$timer_name" 2>/dev/null || true
+  systemctl disable "$timer_name" 2>/dev/null || true
+
+  print_success "$display_name schedule disabled"
   press_enter_to_continue
 }
