@@ -2078,6 +2078,9 @@ cli_job() {
     run|backup)
       cli_job_run "$@"
       ;;
+    schedule|sched)
+      cli_job_schedule "$@"
+      ;;
     --help|-h|help)
       cli_job_help
       return 0
