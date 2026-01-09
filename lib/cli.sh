@@ -2533,7 +2533,76 @@ cli_job_schedule() {
     esac
   fi
 
-  # TODO: BACKUPD-011 - Add --show handler
+  # BACKUPD-011: Show schedule handler
+  if [[ "$show_mode" == true ]]; then
+    local types=()
+    local config_keys=()
+
+    if [[ -n "$backup_type" ]]; then
+      types=("$backup_type")
+      case "$backup_type" in
+        db) config_keys=("SCHEDULE_DB") ;;
+        files) config_keys=("SCHEDULE_FILES") ;;
+        verify) config_keys=("SCHEDULE_VERIFY") ;;
+        verify-full) config_keys=("SCHEDULE_VERIFY_FULL") ;;
+      esac
+    else
+      types=("db" "files" "verify" "verify-full")
+      config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+    fi
+
+    if is_json_output; then
+      local json_output="{\"job\": \"$job_name\", \"schedules\": {"
+      local first=true
+      local i=0
+      for type in "${types[@]}"; do
+        local schedule_value timer_name timer_status
+        schedule_value="$(get_job_config "$job_name" "${config_keys[$i]}")"
+        timer_name="$(get_timer_name "$job_name" "$type").timer"
+
+        if [[ -n "$schedule_value" ]]; then
+          if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+            timer_status="active"
+          else
+            timer_status="inactive"
+          fi
+        else
+          schedule_value=""
+          timer_status="none"
+        fi
+
+        [[ "$first" == true ]] || json_output+=", "
+        first=false
+        json_output+="\"$type\": {\"schedule\": \"$schedule_value\", \"timer_status\": \"$timer_status\"}"
+        ((i++))
+      done
+      json_output+="}}"
+      echo "$json_output"
+    else
+      echo "Schedules for job: $job_name"
+      echo
+      local i=0
+      for type in "${types[@]}"; do
+        local schedule_value timer_name timer_status
+        schedule_value="$(get_job_config "$job_name" "${config_keys[$i]}")"
+        timer_name="$(get_timer_name "$job_name" "$type").timer"
+
+        if [[ -n "$schedule_value" ]]; then
+          if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+            timer_status="active"
+          else
+            timer_status="inactive"
+          fi
+          printf "  %-12s %s (timer: %s)\n" "$type:" "$schedule_value" "$timer_status"
+        else
+          printf "  %-12s No schedule configured\n" "$type:"
+        fi
+        ((i++))
+      done
+    fi
+    return 0
+  fi
+
   # TODO: BACKUPD-012 - Add --disable handler
   # TODO: BACKUPD-013 - Add timer creation handler
 
