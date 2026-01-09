@@ -1246,7 +1246,7 @@ cli_schedule_templates_list() {
 
 # BACKUPD-035: Show details of a specific template
 cli_schedule_templates_show() {
-  local name="$1"
+  local name="${1:-}"
 
   if [[ -z "$name" ]]; then
     print_error "Template name required"
