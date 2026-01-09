@@ -2162,6 +2162,37 @@ cli_job_show() {
       echo "  (none generated)"
     fi
 
+    # BACKUPD-015: Show schedules section
+    local schedule_types=("db" "files" "verify" "verify-full")
+    local config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+    local has_schedules=false
+    local schedule_output=""
+    local i=0
+
+    for type in "${schedule_types[@]}"; do
+      local schedule_value timer_name timer_status
+      schedule_value="$(get_job_config "$job_name" "${config_keys[$i]}")"
+
+      if [[ -n "$schedule_value" ]]; then
+        has_schedules=true
+        timer_name="$(get_timer_name "$job_name" "$type").timer"
+
+        if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+          timer_status="active"
+        else
+          timer_status="inactive"
+        fi
+        schedule_output+="$(printf "  %-12s %s (timer: %s)\n" "$type:" "$schedule_value" "$timer_status")"
+      fi
+      ((i++))
+    done
+
+    if [[ "$has_schedules" == true ]]; then
+      echo
+      echo "Schedules:"
+      echo "$schedule_output"
+    fi
+
     echo
     echo "Timers:"
     list_job_timers "$job_name"
