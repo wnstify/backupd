@@ -38,7 +38,7 @@ debug_init() {
   mkdir -p "$log_dir" 2>/dev/null || true
 
   # Generate session ID
-  DEBUG_SESSION_ID="$(date +%Y%m%d-%H%M%S)-$$"
+  DEBUG_SESSION_ID="$(date +%Y%m%d-%H%M%S.%3N)-$$"
 
   # Rotate if too large
   if [[ -f "$DEBUG_LOG_FILE" ]]; then
