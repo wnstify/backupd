@@ -701,6 +701,110 @@ list_all_job_schedules() {
   done < <(list_jobs)
 }
 
+# BACKUPD-034: Create schedule for all jobs (bulk operation)
+# Usage: create_all_job_schedules "db" "*-*-* 02:00:00"
+# Returns: 0 if all succeed, 1 if any fail
+# Follows pattern from regenerate_all_job_scripts()
+create_all_job_schedules() {
+  local backup_type="$1"
+  local schedule="$2"
+
+  # Validate backup_type
+  case "$backup_type" in
+    db|files|verify|verify-full) ;;
+    *)
+      print_error "Invalid backup type: $backup_type"
+      return 1
+      ;;
+  esac
+
+  # Validate schedule format once before loop
+  if ! validate_schedule_format "$schedule"; then
+    return 1
+  fi
+
+  local job_name
+  local success_count=0
+  local fail_count=0
+  local results=()
+
+  while IFS= read -r job_name; do
+    [[ -z "$job_name" ]] && continue
+
+    if create_job_timer "$job_name" "$backup_type" "$schedule" >/dev/null 2>&1; then
+      ((success_count++)) || true
+      results+=("$job_name:success")
+    else
+      ((fail_count++)) || true
+      results+=("$job_name:failed")
+    fi
+  done < <(list_jobs)
+
+  # Return results as pipe-delimited string for caller to parse
+  printf '%s\n' "${results[@]}"
+
+  if [[ $fail_count -gt 0 ]]; then
+    return 1
+  elif [[ $success_count -eq 0 ]]; then
+    return 2  # No jobs found
+  fi
+
+  return 0
+}
+
+# BACKUPD-034: Disable schedule for all jobs (bulk operation)
+# Usage: disable_all_job_schedules "db"
+# Returns: 0 if all succeed, 1 if any fail
+disable_all_job_schedules() {
+  local backup_type="$1"
+
+  # Validate backup_type
+  case "$backup_type" in
+    db|files|verify|verify-full) ;;
+    *)
+      print_error "Invalid backup type: $backup_type"
+      return 1
+      ;;
+  esac
+
+  local job_name timer_name
+  local success_count=0
+  local fail_count=0
+  local results=()
+
+  while IFS= read -r job_name; do
+    [[ -z "$job_name" ]] && continue
+
+    timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
+
+    # Stop and disable the timer
+    if systemctl stop "$timer_name" 2>/dev/null && \
+       systemctl disable "$timer_name" 2>/dev/null; then
+      ((success_count++)) || true
+      results+=("$job_name:disabled")
+    else
+      # Timer might not exist, check if that's the case
+      if ! systemctl list-unit-files "$timer_name" 2>/dev/null | grep -q "$timer_name"; then
+        results+=("$job_name:not_configured")
+      else
+        ((fail_count++)) || true
+        results+=("$job_name:failed")
+      fi
+    fi
+  done < <(list_jobs)
+
+  # Return results
+  printf '%s\n' "${results[@]}"
+
+  if [[ $fail_count -gt 0 ]]; then
+    return 1
+  elif [[ $success_count -eq 0 ]]; then
+    return 2  # No jobs found or no timers to disable
+  fi
+
+  return 0
+}
+
 # Create systemd timer for a job
 # Usage: create_job_timer "production" "db" "*-*-* 02:00:00"
 create_job_timer() {

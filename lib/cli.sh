@@ -2538,26 +2538,158 @@ cli_job_schedule() {
     shift
   done
 
-  # BACKUPD-023: Handle --all flag to show all schedules across all jobs
+  # BACKUPD-023/034: Handle --all flag for bulk operations
   if [[ "$all_mode" == true ]]; then
-    if is_json_output; then
-      local json_output='{"schedules": ['
-      local first=true
-      while IFS='|' read -r j_name b_type sched t_status; do
-        [[ "$first" == true ]] || json_output+=','
-        first=false
-        json_output+="{\"job\": \"$j_name\", \"backup_type\": \"$b_type\", \"schedule\": \"$sched\", \"timer_status\": \"$t_status\"}"
-      done < <(list_all_job_schedules)
-      json_output+=']}'
-      echo "$json_output"
-    else
-      printf "%-20s %-12s %-25s %s\n" "JOB" "TYPE" "SCHEDULE" "STATUS"
-      printf "%-20s %-12s %-25s %s\n" "---" "----" "--------" "------"
-      while IFS='|' read -r j_name b_type sched t_status; do
-        printf "%-20s %-12s %-25s %s\n" "$j_name" "$b_type" "$sched" "$t_status"
-      done < <(list_all_job_schedules)
+    # BACKUPD-034: Determine operation mode based on arguments
+    # SHOW mode: --all (no backup_type, no schedule, no disable)
+    # SET mode:  --all <backup_type> <schedule>
+    # DISABLE mode: --all <backup_type> --disable
+
+    # Case 1: SHOW all schedules (original behavior)
+    if [[ -z "$backup_type" && -z "$schedule" && "$disable_mode" == false ]]; then
+      if is_json_output; then
+        local json_output='{"schedules": ['
+        local first=true
+        while IFS='|' read -r j_name b_type sched t_status; do
+          [[ "$first" == true ]] || json_output+=','
+          first=false
+          json_output+="{\"job\": \"$j_name\", \"backup_type\": \"$b_type\", \"schedule\": \"$sched\", \"timer_status\": \"$t_status\"}"
+        done < <(list_all_job_schedules)
+        json_output+=']}'
+        echo "$json_output"
+      else
+        printf "%-20s %-12s %-25s %s\n" "JOB" "TYPE" "SCHEDULE" "STATUS"
+        printf "%-20s %-12s %-25s %s\n" "---" "----" "--------" "------"
+        while IFS='|' read -r j_name b_type sched t_status; do
+          printf "%-20s %-12s %-25s %s\n" "$j_name" "$b_type" "$sched" "$t_status"
+        done < <(list_all_job_schedules)
+      fi
+      return 0
     fi
-    return 0
+
+    # Case 2: BULK SET schedules
+    if [[ -n "$backup_type" && -n "$schedule" && "$disable_mode" == false ]]; then
+      # Validate backup_type
+      case "$backup_type" in
+        db|files|verify|verify-full) ;;
+        *)
+          print_error "Invalid backup type: $backup_type"
+          echo "Valid types: db, files, verify, verify-full"
+          return 4
+          ;;
+      esac
+
+      # Require root for bulk operations
+      if [[ $EUID -ne 0 ]]; then
+        print_error "Bulk schedule operations require root privileges"
+        return $EXIT_NOPERM
+      fi
+
+      local results success_count=0 fail_count=0
+      results=$(create_all_job_schedules "$backup_type" "$schedule" 2>&1)
+      local exit_code=$?
+
+      if is_json_output; then
+        local json_results='{"operation": "bulk_schedule_set", "backup_type": "'"$backup_type"'", "schedule": "'"$schedule"'", "results": ['
+        local first=true
+        while IFS=: read -r j_name status; do
+          [[ -z "$j_name" ]] && continue
+          [[ "$first" == true ]] || json_results+=','
+          first=false
+          json_results+="{\"job\": \"$j_name\", \"status\": \"$status\"}"
+          [[ "$status" == "success" ]] && ((success_count++)) || ((fail_count++))
+        done <<< "$results"
+        json_results+='], "jobs_succeeded": '"$success_count"', "jobs_failed": '"$fail_count"'}'
+        echo "$json_results"
+      else
+        print_info "Setting $backup_type schedule to '$schedule' for all jobs..."
+        echo
+        while IFS=: read -r j_name status; do
+          [[ -z "$j_name" ]] && continue
+          if [[ "$status" == "success" ]]; then
+            print_success "  $j_name: scheduled"
+            ((success_count++))
+          else
+            print_error "  $j_name: failed"
+            ((fail_count++))
+          fi
+        done <<< "$results"
+        echo
+        if [[ $fail_count -gt 0 ]]; then
+          print_warning "Summary: $success_count succeeded, $fail_count failed"
+        elif [[ $success_count -gt 0 ]]; then
+          print_success "Summary: $success_count job(s) scheduled"
+        else
+          print_info "No jobs configured"
+        fi
+      fi
+      return $exit_code
+    fi
+
+    # Case 3: BULK DISABLE schedules
+    if [[ -n "$backup_type" && "$disable_mode" == true ]]; then
+      # Validate backup_type
+      case "$backup_type" in
+        db|files|verify|verify-full) ;;
+        *)
+          print_error "Invalid backup type: $backup_type"
+          echo "Valid types: db, files, verify, verify-full"
+          return 4
+          ;;
+      esac
+
+      # Require root for bulk operations
+      if [[ $EUID -ne 0 ]]; then
+        print_error "Bulk schedule operations require root privileges"
+        return $EXIT_NOPERM
+      fi
+
+      local results success_count=0 fail_count=0
+      results=$(disable_all_job_schedules "$backup_type" 2>&1)
+      local exit_code=$?
+
+      if is_json_output; then
+        local json_results='{"operation": "bulk_schedule_disable", "backup_type": "'"$backup_type"'", "results": ['
+        local first=true
+        while IFS=: read -r j_name status; do
+          [[ -z "$j_name" ]] && continue
+          [[ "$first" == true ]] || json_results+=','
+          first=false
+          json_results+="{\"job\": \"$j_name\", \"status\": \"$status\"}"
+          [[ "$status" == "disabled" ]] && ((success_count++))
+          [[ "$status" == "failed" ]] && ((fail_count++))
+        done <<< "$results"
+        json_results+='], "jobs_disabled": '"$success_count"', "jobs_failed": '"$fail_count"'}'
+        echo "$json_results"
+      else
+        print_info "Disabling $backup_type schedule for all jobs..."
+        echo
+        while IFS=: read -r j_name status; do
+          [[ -z "$j_name" ]] && continue
+          case "$status" in
+            disabled) print_success "  $j_name: disabled"; ((success_count++)) ;;
+            not_configured) print_info "  $j_name: not configured" ;;
+            failed) print_error "  $j_name: failed"; ((fail_count++)) ;;
+          esac
+        done <<< "$results"
+        echo
+        if [[ $fail_count -gt 0 ]]; then
+          print_warning "Summary: $success_count disabled, $fail_count failed"
+        elif [[ $success_count -gt 0 ]]; then
+          print_success "Summary: $success_count job(s) disabled"
+        else
+          print_info "No timers to disable"
+        fi
+      fi
+      return $exit_code
+    fi
+
+    # Invalid --all usage
+    print_error "Invalid --all usage"
+    echo "Usage: backupd job schedule --all                    # Show all schedules"
+    echo "       backupd job schedule --all <type> <schedule>  # Set schedule for all jobs"
+    echo "       backupd job schedule --all <type> --disable   # Disable schedule for all jobs"
+    return $EXIT_USAGE
   fi
 
   # Validation: require job_name at minimum
