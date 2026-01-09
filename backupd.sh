@@ -669,8 +669,9 @@ if [[ ! -d /var/run/backupd ]]; then
   chmod 755 /var/run/backupd 2>/dev/null || true
 fi
 
-# Install command if not already installed
-if [[ ! -L "/usr/local/bin/backupd" ]]; then
+# Install command if not pointing to this script
+_current_link=$(readlink -f "/usr/local/bin/backupd" 2>/dev/null || echo "")
+if [[ "$_current_link" != "$(readlink -f "$0")" ]]; then
   debug_info "Installing backupd command"
   install_command
 fi
