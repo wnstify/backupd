@@ -10,6 +10,18 @@
 #   - Removed legacy restore generators (restic restore handled in restore.sh)
 # ============================================================================
 
+# ---------- Helper Functions ----------
+
+# Escape special characters for sed replacement string
+# Prevents & | \ from being interpreted as sed metacharacters
+escape_sed_replacement() {
+  local string="$1"
+  string="${string//\\/\\\\}"   # Escape backslashes first
+  string="${string//&/\\&}"     # Escape ampersands
+  string="${string//|/\\|}"     # Escape pipe (our delimiter)
+  echo "$string"
+}
+
 # ---------- Generate All Scripts ----------
 
 generate_all_scripts() {
@@ -66,7 +78,7 @@ umask 077
 # Uses restic for encrypted, deduplicated backups via rclone backend
 # ============================================================================
 
-INSTALL_DIR="/etc/backupd"
+INSTALL_DIR="%%INSTALL_DIR%%"
 source "$INSTALL_DIR/lib/logging.sh"
 source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
@@ -428,12 +440,19 @@ else
 fi
 DBBACKUPEOF
 
-  # Replace placeholders
+  # Replace placeholders (escape special sed chars)
+  local esc_secrets_dir esc_rclone_remote esc_rclone_path esc_logs_dir esc_install_dir
+  esc_secrets_dir=$(escape_sed_replacement "$SECRETS_DIR")
+  esc_rclone_remote=$(escape_sed_replacement "$RCLONE_REMOTE")
+  esc_rclone_path=$(escape_sed_replacement "$RCLONE_PATH")
+  esc_logs_dir=$(escape_sed_replacement "$LOGS_DIR")
+  esc_install_dir=$(escape_sed_replacement "$INSTALL_DIR")
   sed -i \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
-    -e "s|%%RCLONE_PATH%%|$RCLONE_PATH|g" \
-    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%INSTALL_DIR%%|$esc_install_dir|g" \
+    -e "s|%%SECRETS_DIR%%|$esc_secrets_dir|g" \
+    -e "s|%%RCLONE_REMOTE%%|$esc_rclone_remote|g" \
+    -e "s|%%RCLONE_PATH%%|$esc_rclone_path|g" \
+    -e "s|%%LOGS_DIR%%|$esc_logs_dir|g" \
     -e "s|%%RETENTION_DAYS%%|$RETENTION_DAYS|g" \
     "$SCRIPTS_DIR/db_backup.sh"
 
@@ -461,7 +480,7 @@ umask 077
 # Uses restic for encrypted, deduplicated backups via rclone backend
 # ============================================================================
 
-INSTALL_DIR="/etc/backupd"
+INSTALL_DIR="%%INSTALL_DIR%%"
 source "$INSTALL_DIR/lib/logging.sh"
 source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
@@ -874,15 +893,24 @@ else
 fi
 FILESBACKUPEOF
 
-  # Replace placeholders
+  # Replace placeholders (escape special sed chars)
+  local esc_secrets_dir esc_rclone_remote esc_rclone_path esc_logs_dir esc_web_path esc_webroot esc_install_dir
+  esc_secrets_dir=$(escape_sed_replacement "$SECRETS_DIR")
+  esc_rclone_remote=$(escape_sed_replacement "$RCLONE_REMOTE")
+  esc_rclone_path=$(escape_sed_replacement "$RCLONE_PATH")
+  esc_logs_dir=$(escape_sed_replacement "$LOGS_DIR")
+  esc_web_path=$(escape_sed_replacement "$WEB_PATH_PATTERN")
+  esc_webroot=$(escape_sed_replacement "$WEBROOT_SUBDIR")
+  esc_install_dir=$(escape_sed_replacement "$INSTALL_DIR")
   sed -i \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
-    -e "s|%%RCLONE_PATH%%|$RCLONE_PATH|g" \
-    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%INSTALL_DIR%%|$esc_install_dir|g" \
+    -e "s|%%SECRETS_DIR%%|$esc_secrets_dir|g" \
+    -e "s|%%RCLONE_REMOTE%%|$esc_rclone_remote|g" \
+    -e "s|%%RCLONE_PATH%%|$esc_rclone_path|g" \
+    -e "s|%%LOGS_DIR%%|$esc_logs_dir|g" \
     -e "s|%%RETENTION_DAYS%%|$RETENTION_DAYS|g" \
-    -e "s|%%WEB_PATH_PATTERN%%|$WEB_PATH_PATTERN|g" \
-    -e "s|%%WEBROOT_SUBDIR%%|$WEBROOT_SUBDIR|g" \
+    -e "s|%%WEB_PATH_PATTERN%%|$esc_web_path|g" \
+    -e "s|%%WEBROOT_SUBDIR%%|$esc_webroot|g" \
     "$SCRIPTS_DIR/files_backup.sh"
 
   chmod +x "$SCRIPTS_DIR/files_backup.sh"
@@ -906,7 +934,7 @@ umask 077
 # Interactive restore from restic snapshots (database and files)
 # ============================================================================
 
-INSTALL_DIR="/etc/backupd"
+INSTALL_DIR="%%INSTALL_DIR%%"
 source "$INSTALL_DIR/lib/logging.sh"
 source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
@@ -1358,12 +1386,19 @@ main_menu() {
 main_menu
 RESTOREEOF
 
-  # Replace placeholders
+  # Replace placeholders (escape special sed chars)
+  local esc_secrets_dir esc_rclone_remote esc_db_path esc_files_path esc_install_dir
+  esc_secrets_dir=$(escape_sed_replacement "$SECRETS_DIR")
+  esc_rclone_remote=$(escape_sed_replacement "$RCLONE_REMOTE")
+  esc_db_path=$(escape_sed_replacement "$RCLONE_DB_PATH")
+  esc_files_path=$(escape_sed_replacement "$RCLONE_FILES_PATH")
+  esc_install_dir=$(escape_sed_replacement "$INSTALL_DIR")
   sed -i \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
-    -e "s|%%RCLONE_DB_PATH%%|$RCLONE_DB_PATH|g" \
-    -e "s|%%RCLONE_FILES_PATH%%|$RCLONE_FILES_PATH|g" \
+    -e "s|%%INSTALL_DIR%%|$esc_install_dir|g" \
+    -e "s|%%SECRETS_DIR%%|$esc_secrets_dir|g" \
+    -e "s|%%RCLONE_REMOTE%%|$esc_rclone_remote|g" \
+    -e "s|%%RCLONE_DB_PATH%%|$esc_db_path|g" \
+    -e "s|%%RCLONE_FILES_PATH%%|$esc_files_path|g" \
     "$SCRIPTS_DIR/restore.sh"
 
   chmod +x "$SCRIPTS_DIR/restore.sh"
@@ -1395,7 +1430,7 @@ umask 077
 # Recommended: Run weekly via systemd timer
 # ============================================================================
 
-INSTALL_DIR="/etc/backupd"
+INSTALL_DIR="%%INSTALL_DIR%%"
 source "$INSTALL_DIR/lib/logging.sh"
 source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
@@ -1582,13 +1617,21 @@ else
 fi
 VERIFYEOF
 
-  # Replace placeholders in quick verify script
+  # Replace placeholders in quick verify script (escape special sed chars)
+  local esc_secrets_dir esc_rclone_remote esc_db_path esc_files_path esc_logs_dir esc_install_dir
+  esc_secrets_dir=$(escape_sed_replacement "$SECRETS_DIR")
+  esc_rclone_remote=$(escape_sed_replacement "$RCLONE_REMOTE")
+  esc_db_path=$(escape_sed_replacement "$RCLONE_DB_PATH")
+  esc_files_path=$(escape_sed_replacement "$RCLONE_FILES_PATH")
+  esc_logs_dir=$(escape_sed_replacement "$LOGS_DIR")
+  esc_install_dir=$(escape_sed_replacement "$INSTALL_DIR")
   sed -i \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
-    -e "s|%%RCLONE_DB_PATH%%|$RCLONE_DB_PATH|g" \
-    -e "s|%%RCLONE_FILES_PATH%%|$RCLONE_FILES_PATH|g" \
-    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%INSTALL_DIR%%|$esc_install_dir|g" \
+    -e "s|%%SECRETS_DIR%%|$esc_secrets_dir|g" \
+    -e "s|%%RCLONE_REMOTE%%|$esc_rclone_remote|g" \
+    -e "s|%%RCLONE_DB_PATH%%|$esc_db_path|g" \
+    -e "s|%%RCLONE_FILES_PATH%%|$esc_files_path|g" \
+    -e "s|%%LOGS_DIR%%|$esc_logs_dir|g" \
     "$SCRIPTS_DIR/verify_backup.sh"
 
   chmod +x "$SCRIPTS_DIR/verify_backup.sh"
@@ -1606,7 +1649,7 @@ umask 077
 # Recommended: Run monthly via systemd timer
 # ============================================================================
 
-INSTALL_DIR="/etc/backupd"
+INSTALL_DIR="%%INSTALL_DIR%%"
 source "$INSTALL_DIR/lib/logging.sh"
 source "$INSTALL_DIR/lib/debug.sh"
 source "$INSTALL_DIR/lib/restic.sh"
@@ -1834,13 +1877,14 @@ else
 fi
 FULLVERIFYEOF
 
-  # Replace placeholders in full verify script
+  # Replace placeholders in full verify script (reuse escaped vars from quick verify)
   sed -i \
-    -e "s|%%SECRETS_DIR%%|$SECRETS_DIR|g" \
-    -e "s|%%RCLONE_REMOTE%%|$RCLONE_REMOTE|g" \
-    -e "s|%%RCLONE_DB_PATH%%|$RCLONE_DB_PATH|g" \
-    -e "s|%%RCLONE_FILES_PATH%%|$RCLONE_FILES_PATH|g" \
-    -e "s|%%LOGS_DIR%%|$LOGS_DIR|g" \
+    -e "s|%%INSTALL_DIR%%|$esc_install_dir|g" \
+    -e "s|%%SECRETS_DIR%%|$esc_secrets_dir|g" \
+    -e "s|%%RCLONE_REMOTE%%|$esc_rclone_remote|g" \
+    -e "s|%%RCLONE_DB_PATH%%|$esc_db_path|g" \
+    -e "s|%%RCLONE_FILES_PATH%%|$esc_files_path|g" \
+    -e "s|%%LOGS_DIR%%|$esc_logs_dir|g" \
     "$SCRIPTS_DIR/verify_full_backup.sh"
 
   chmod +x "$SCRIPTS_DIR/verify_full_backup.sh"
