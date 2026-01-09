@@ -2078,6 +2078,9 @@ cli_job() {
     run|backup)
       cli_job_run "$@"
       ;;
+    schedule|sched)
+      cli_job_schedule "$@"
+      ;;
     --help|-h|help)
       cli_job_help
       return 0
@@ -2157,6 +2160,37 @@ cli_job_show() {
       done
     else
       echo "  (none generated)"
+    fi
+
+    # BACKUPD-015: Show schedules section
+    local schedule_types=("db" "files" "verify" "verify-full")
+    local config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+    local has_schedules=false
+    local schedule_output=""
+    local i=0
+
+    for type in "${schedule_types[@]}"; do
+      local schedule_value timer_name timer_status
+      schedule_value="$(get_job_config "$job_name" "${config_keys[$i]}")"
+
+      if [[ -n "$schedule_value" ]]; then
+        has_schedules=true
+        timer_name="$(get_timer_name "$job_name" "$type").timer"
+
+        if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+          timer_status="active"
+        else
+          timer_status="inactive"
+        fi
+        schedule_output+="$(printf "  %-12s %s (timer: %s)\n" "$type:" "$schedule_value" "$timer_status")"
+      fi
+      ((i++))
+    done
+
+    if [[ "$has_schedules" == true ]]; then
+      echo
+      echo "Schedules:"
+      echo "$schedule_output"
     fi
 
     echo
@@ -2479,6 +2513,240 @@ cli_job_timers() {
   fi
 }
 
+cli_job_schedule() {
+  local job_name="" backup_type="" schedule=""
+  local show_mode=false disable_mode=false all_mode=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) JSON_OUTPUT=1 ;;
+      --show|-s) show_mode=true ;;
+      --disable|-d) disable_mode=true ;;
+      --all|-a) all_mode=true ;;
+      --help|-h) cli_job_help; return 0 ;;
+      -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
+      *)
+        if [[ -z "$job_name" ]]; then
+          job_name="$1"
+        elif [[ -z "$backup_type" ]]; then
+          backup_type="$1"
+        else
+          schedule="$1"
+        fi
+        ;;
+    esac
+    shift
+  done
+
+  # BACKUPD-023: Handle --all flag to show all schedules across all jobs
+  if [[ "$all_mode" == true ]]; then
+    if is_json_output; then
+      local json_output='{"schedules": ['
+      local first=true
+      while IFS='|' read -r j_name b_type sched t_status; do
+        [[ "$first" == true ]] || json_output+=','
+        first=false
+        json_output+="{\"job\": \"$j_name\", \"backup_type\": \"$b_type\", \"schedule\": \"$sched\", \"timer_status\": \"$t_status\"}"
+      done < <(list_all_job_schedules)
+      json_output+=']}'
+      echo "$json_output"
+    else
+      printf "%-20s %-12s %-25s %s\n" "JOB" "TYPE" "SCHEDULE" "STATUS"
+      printf "%-20s %-12s %-25s %s\n" "---" "----" "--------" "------"
+      while IFS='|' read -r j_name b_type sched t_status; do
+        printf "%-20s %-12s %-25s %s\n" "$j_name" "$b_type" "$sched" "$t_status"
+      done < <(list_all_job_schedules)
+    fi
+    return 0
+  fi
+
+  # Validation: require job_name at minimum
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job schedule <job_name> [backup_type] [schedule]"
+    echo "       backupd job schedule <job_name> --show"
+    echo "       backupd job schedule <job_name> <backup_type> --disable"
+    return 2
+  fi
+
+  # Validation: job must exist
+  if ! job_exists "$job_name"; then
+    print_error "Job '$job_name' not found"
+    return 3
+  fi
+
+  # Validation: backup_type (if provided) must be valid
+  if [[ -n "$backup_type" ]]; then
+    case "$backup_type" in
+      db|files|verify|verify-full) ;;
+      *)
+        print_error "Invalid backup type: $backup_type"
+        echo "Valid types: db, files, verify, verify-full"
+        return 4
+        ;;
+    esac
+  fi
+
+  # BACKUPD-011: Show schedule handler
+  if [[ "$show_mode" == true ]]; then
+    local types=()
+    local config_keys=()
+
+    if [[ -n "$backup_type" ]]; then
+      types=("$backup_type")
+      case "$backup_type" in
+        db) config_keys=("SCHEDULE_DB") ;;
+        files) config_keys=("SCHEDULE_FILES") ;;
+        verify) config_keys=("SCHEDULE_VERIFY") ;;
+        verify-full) config_keys=("SCHEDULE_VERIFY_FULL") ;;
+      esac
+    else
+      types=("db" "files" "verify" "verify-full")
+      config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+    fi
+
+    if is_json_output; then
+      local json_output="{\"job\": \"$job_name\", \"schedules\": {"
+      local first=true
+      local i=0
+      for type in "${types[@]}"; do
+        local schedule_value timer_name timer_status
+        schedule_value="$(get_job_config "$job_name" "${config_keys[$i]}")"
+        timer_name="$(get_timer_name "$job_name" "$type").timer"
+
+        if [[ -n "$schedule_value" ]]; then
+          if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+            timer_status="active"
+          else
+            timer_status="inactive"
+          fi
+        else
+          schedule_value=""
+          timer_status="none"
+        fi
+
+        [[ "$first" == true ]] || json_output+=", "
+        first=false
+        json_output+="\"$type\": {\"schedule\": \"$schedule_value\", \"timer_status\": \"$timer_status\"}"
+        ((i++))
+      done
+      json_output+="}}"
+      echo "$json_output"
+    else
+      echo "Schedules for job: $job_name"
+      echo
+      local i=0
+      for type in "${types[@]}"; do
+        local schedule_value timer_name timer_status
+        schedule_value="$(get_job_config "$job_name" "${config_keys[$i]}")"
+        timer_name="$(get_timer_name "$job_name" "$type").timer"
+
+        if [[ -n "$schedule_value" ]]; then
+          if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+            timer_status="active"
+          else
+            timer_status="inactive"
+          fi
+          printf "  %-12s %s (timer: %s)\n" "$type:" "$schedule_value" "$timer_status"
+        else
+          printf "  %-12s No schedule configured\n" "$type:"
+        fi
+        ((i++))
+      done
+    fi
+    return 0
+  fi
+
+  # BACKUPD-012: Disable timer handler
+  if [[ "$disable_mode" == true ]]; then
+    # backup_type is required for disable
+    if [[ -z "$backup_type" ]]; then
+      print_error "Backup type required for --disable"
+      echo "Usage: backupd job schedule <job_name> <backup_type> --disable"
+      return 2
+    fi
+
+    local timer_name
+    timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
+
+    # Stop and disable the timer (does NOT clear config)
+    systemctl stop "$timer_name" 2>/dev/null || true
+    systemctl disable "$timer_name" 2>/dev/null || true
+
+    if is_json_output; then
+      echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"status\": \"disabled\"}"
+    else
+      print_success "Timer '$timer_name' disabled"
+      echo "Note: Schedule config preserved. Use 'backupd job schedule $job_name --show' to view."
+    fi
+    return 0
+  fi
+
+  # BACKUPD-013: Create timer handler
+  # Require both backup_type and schedule
+  if [[ -z "$backup_type" ]] || [[ -z "$schedule" ]]; then
+    print_error "Backup type and schedule required to create timer"
+    echo "Usage: backupd job schedule <job_name> <backup_type> <schedule>"
+    echo "Example: backupd job schedule prod db '*-*-* 02:00:00'"
+    return 2
+  fi
+
+  # BACKUPD-019: Validate schedule format before creating timer
+  if ! validate_schedule_format "$schedule" 2>/dev/null; then
+    if is_json_output; then
+      echo "{\"error\": \"Invalid schedule format\", \"schedule\": \"$schedule\", \"hint\": \"Test with: systemd-analyze calendar '$schedule'\"}"
+    else
+      print_error "Invalid schedule format: $schedule"
+      echo "Hint: Test with: systemd-analyze calendar '$schedule'"
+    fi
+    return 6
+  fi
+
+  local timer_name
+  timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
+
+  # Redirect create_job_timer output when JSON mode
+  if is_json_output; then
+    if create_job_timer "$job_name" "$backup_type" "$schedule" >/dev/null 2>&1; then
+      # BACKUPD-022: Check for schedule conflicts and capture warnings
+      local conflict_warnings
+      conflict_warnings=$(check_schedule_conflicts "$job_name" "$backup_type" "$schedule" 2>&1)
+
+      if [[ -n "$conflict_warnings" ]]; then
+        # Build JSON array from warnings
+        local warnings_json="["
+        local first=true
+        while IFS= read -r warning_line; do
+          if [[ "$first" == "true" ]]; then
+            first=false
+          else
+            warnings_json+=","
+          fi
+          # Escape the warning message for JSON
+          warnings_json+="\"$warning_line\""
+        done <<< "$conflict_warnings"
+        warnings_json+="]"
+        echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\", \"warnings\": $warnings_json}"
+      else
+        echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\"}"
+      fi
+      return 0
+    else
+      echo "{\"error\": \"Failed to create timer\", \"job\": \"$job_name\", \"backup_type\": \"$backup_type\"}"
+      return 5
+    fi
+  else
+    if ! create_job_timer "$job_name" "$backup_type" "$schedule"; then
+      print_error "Failed to create timer for $job_name $backup_type"
+      return 5
+    fi
+    # BACKUPD-022: Check for schedule conflicts (warnings go to stderr)
+    check_schedule_conflicts "$job_name" "$backup_type" "$schedule"
+    # create_job_timer already prints success message
+    return 0
+  fi
+}
+
 cli_job_run() {
   local job_name="" backup_type="all" dry_run=false
 
@@ -2611,12 +2879,17 @@ Commands:
   run <name> [db|files|all]   Run backup for a specific job
   regenerate <name> | --all   Regenerate backup scripts for job(s)
   timers <name>               Show systemd timers for a job
+  schedule <name> <type> <schedule>
+                              Configure backup schedule for a job
 
 Options:
   --json            Output in JSON format
   --dry-run, -n     Preview what would be executed (for run)
   --force, -f       Force operation (for delete)
-  --all, -a         Apply to all jobs (for regenerate)
+  --all, -a         Apply to all jobs (for regenerate), or
+                    show all schedules across all jobs (for schedule)
+  --show, -s        Show current schedule (for schedule)
+  --disable, -d     Disable timer without removing config (for schedule)
   --help, -h        Show this help message
 
 Requires: Root privileges for create/delete/enable/disable/regenerate.
@@ -2643,6 +2916,12 @@ Examples:
   backupd job regenerate production     # Regenerate scripts
   backupd job regenerate --all          # Regenerate all jobs
   backupd job timers production         # Show job timers
+  backupd job schedule prod db "*-*-* 02:00:00"
+                                        # Set daily 2am database backup
+  backupd job schedule prod --show      # Show all schedules
+  backupd job schedule prod db --disable
+                                        # Disable db timer
+  backupd job schedule --all            # Show all schedules across all jobs
 
 After creating a job, configure it with the interactive menu:
   sudo backupd

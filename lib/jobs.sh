@@ -456,6 +456,97 @@ get_timer_name() {
   fi
 }
 
+# Validate OnCalendar schedule format
+# Usage: validate_schedule_format "*-*-* 02:00:00"
+# Returns: 0 if valid, 1 if invalid
+validate_schedule_format() {
+  local schedule="$1"
+  local error_output
+
+  if [[ -z "$schedule" ]]; then
+    echo "Error: Schedule expression is required" >&2
+    return 1
+  fi
+
+  # Use systemd-analyze to validate the OnCalendar expression
+  if ! error_output=$(systemd-analyze calendar "$schedule" --iterations=1 2>&1); then
+    echo "Error: Invalid schedule format: $error_output" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Check for schedule conflicts across jobs
+# Usage: check_schedule_conflicts "production" "db" "*-*-* 02:00:00"
+# Returns: 0 always (advisory only, does not block)
+# Outputs warnings to stderr if conflicts found
+check_schedule_conflicts() {
+  local job_name="$1"
+  local backup_type="$2"
+  local schedule="$3"
+
+  # Get the config key for this backup type
+  local config_key
+  case "$backup_type" in
+    db) config_key="SCHEDULE_DB" ;;
+    files) config_key="SCHEDULE_FILES" ;;
+    verify) config_key="SCHEDULE_VERIFY" ;;
+    verify-full) config_key="SCHEDULE_VERIFY_FULL" ;;
+    *) return 0 ;;  # Unknown type, skip check
+  esac
+
+  # Loop through all jobs looking for conflicts
+  local other_job other_schedule
+  while IFS= read -r other_job; do
+    # Skip the current job being configured
+    [[ "$other_job" == "$job_name" ]] && continue
+
+    # Get the schedule for the same backup type in the other job
+    other_schedule=$(get_job_config "$other_job" "$config_key")
+
+    # Check for exact string match (same type, same schedule)
+    if [[ -n "$other_schedule" && "$other_schedule" == "$schedule" ]]; then
+      echo "Warning: Job '$other_job' also has $backup_type backup at $schedule" >&2
+    fi
+  done < <(list_jobs)
+
+  return 0
+}
+
+# List all schedules across all jobs
+# Usage: list_all_job_schedules
+# Output format: job_name|backup_type|schedule|timer_status (one per line)
+# timer_status: active, inactive, or unknown
+list_all_job_schedules() {
+  local job_name backup_type schedule timer_name timer_status
+  local types=("db" "files" "verify" "verify-full")
+  local config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+
+  while IFS= read -r job_name; do
+    for i in "${!types[@]}"; do
+      backup_type="${types[$i]}"
+      schedule=$(get_job_config "$job_name" "${config_keys[$i]}")
+
+      # Only output if schedule is configured
+      if [[ -n "$schedule" ]]; then
+        timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
+
+        # Get timer status
+        if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+          timer_status="active"
+        elif systemctl list-unit-files "$timer_name" 2>/dev/null | grep -q "$timer_name"; then
+          timer_status="inactive"
+        else
+          timer_status="unknown"
+        fi
+
+        echo "${job_name}|${backup_type}|${schedule}|${timer_status}"
+      fi
+    done
+  done < <(list_jobs)
+}
+
 # Create systemd timer for a job
 # Usage: create_job_timer "production" "db" "*-*-* 02:00:00"
 create_job_timer() {
@@ -464,6 +555,11 @@ create_job_timer() {
   local schedule="$3"
 
   validate_job_name "$job_name" || return 1
+
+  # Validate schedule format before proceeding
+  if ! validate_schedule_format "$schedule"; then
+    return 1
+  fi
 
   if ! job_exists "$job_name"; then
     print_error "Job '$job_name' does not exist"
@@ -602,6 +698,21 @@ enable_job() {
 
   save_job_config "$job_name" "JOB_ENABLED" "true"
   print_success "Enabled job '$job_name'"
+
+  # Recreate timers from stored schedule config
+  local types=("db" "files" "verify" "verify-full")
+  local config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+  local i schedule
+
+  for i in "${!types[@]}"; do
+    schedule="$(get_job_config "$job_name" "${config_keys[$i]}")"
+    if [[ -n "$schedule" ]]; then
+      # Suppress output during re-enable, just recreate the timer
+      if create_job_timer "$job_name" "${types[$i]}" "$schedule" >/dev/null 2>&1; then
+        print_info "Recreated timer for ${types[$i]} backup"
+      fi
+    fi
+  done
 
   return 0
 }
