@@ -32,6 +32,7 @@ manage_schedules() {
       if [[ -z "$db_schedule" ]]; then
         db_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-db.timer 2>/dev/null | cut -d'=' -f2)
       fi
+      [[ -z "$db_schedule" ]] && db_schedule="(unknown)"
       print_success "Database (systemd): $db_schedule"
     elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/db_backup.sh"; then
       local db_schedule
@@ -47,6 +48,7 @@ manage_schedules() {
       if [[ -z "$files_schedule" ]]; then
         files_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-files.timer 2>/dev/null | cut -d'=' -f2)
       fi
+      [[ -z "$files_schedule" ]] && files_schedule="(unknown)"
       print_success "Files (systemd): $files_schedule"
     elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/files_backup.sh"; then
       local files_schedule
@@ -264,6 +266,8 @@ Requires=$service_name
 
 [Timer]
 OnCalendar=$on_calendar
+# RandomizedDelaySec: Spread backups to prevent thundering herd
+# Note: Use different OnCalendar schedules for db vs files to avoid overlap
 RandomizedDelaySec=300
 Persistent=true
 
@@ -271,10 +275,9 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-  # Ensure service file exists
-  if [[ ! -f "/etc/systemd/system/$service_name" ]]; then
-    local script_path="$SCRIPTS_DIR/${timer_type}_backup.sh"
-    cat > "/etc/systemd/system/$service_name" << EOF
+  # Always regenerate service file to ensure correct paths
+  local script_path="$SCRIPTS_DIR/${timer_type}_backup.sh"
+  cat > "/etc/systemd/system/$service_name" << EOF
 [Unit]
 Description=Backupd - $display_name Backup
 After=network-online.target
@@ -291,18 +294,17 @@ IOSchedulingClass=idle
 [Install]
 WantedBy=multi-user.target
 EOF
-  fi
 
   # Reload and enable
   systemctl daemon-reload
   systemctl enable "$timer_name" 2>/dev/null || true
   systemctl start "$timer_name" 2>/dev/null || true
 
-  # Remove any cron entries for this backup
+  # Remove any cron entries for this backup (use regex for precise matching)
   if [[ "$timer_type" == "db" ]]; then
-    ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/db_backup.sh" ) | crontab - 2>/dev/null || true
+    ( crontab -l 2>/dev/null | grep -v "^[^#].*$SCRIPTS_DIR/db_backup.sh\\( \\|$\\)" ) | crontab - 2>/dev/null || true
   else
-    ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/files_backup.sh" ) | crontab - 2>/dev/null || true
+    ( crontab -l 2>/dev/null | grep -v "^[^#].*$SCRIPTS_DIR/files_backup.sh\\( \\|$\\)" ) | crontab - 2>/dev/null || true
   fi
 
   echo
