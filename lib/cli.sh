@@ -2506,7 +2506,33 @@ cli_job_schedule() {
     shift
   done
 
-  # TODO: BACKUPD-010 - Add validation logic
+  # Validation: require job_name at minimum
+  if [[ -z "$job_name" ]]; then
+    print_error "Job name required"
+    echo "Usage: backupd job schedule <job_name> [backup_type] [schedule]"
+    echo "       backupd job schedule <job_name> --show"
+    echo "       backupd job schedule <job_name> <backup_type> --disable"
+    return 2
+  fi
+
+  # Validation: job must exist
+  if ! job_exists "$job_name"; then
+    print_error "Job '$job_name' not found"
+    return 3
+  fi
+
+  # Validation: backup_type (if provided) must be valid
+  if [[ -n "$backup_type" ]]; then
+    case "$backup_type" in
+      db|files|verify|verify-full) ;;
+      *)
+        print_error "Invalid backup type: $backup_type"
+        echo "Valid types: db, files, verify, verify-full"
+        return 4
+        ;;
+    esac
+  fi
+
   # TODO: BACKUPD-011 - Add --show handler
   # TODO: BACKUPD-012 - Add --disable handler
   # TODO: BACKUPD-013 - Add timer creation handler
