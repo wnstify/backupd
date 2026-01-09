@@ -456,6 +456,27 @@ get_timer_name() {
   fi
 }
 
+# Validate OnCalendar schedule format
+# Usage: validate_schedule_format "*-*-* 02:00:00"
+# Returns: 0 if valid, 1 if invalid
+validate_schedule_format() {
+  local schedule="$1"
+  local error_output
+
+  if [[ -z "$schedule" ]]; then
+    echo "Error: Schedule expression is required" >&2
+    return 1
+  fi
+
+  # Use systemd-analyze to validate the OnCalendar expression
+  if ! error_output=$(systemd-analyze calendar "$schedule" --iterations=1 2>&1); then
+    echo "Error: Invalid schedule format: $error_output" >&2
+    return 1
+  fi
+
+  return 0
+}
+
 # Create systemd timer for a job
 # Usage: create_job_timer "production" "db" "*-*-* 02:00:00"
 create_job_timer() {
