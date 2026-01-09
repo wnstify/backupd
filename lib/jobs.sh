@@ -481,6 +481,7 @@ validate_schedule_format() {
 # Usage: check_schedule_conflicts "production" "db" "*-*-* 02:00:00"
 # Returns: 0 always (advisory only, does not block)
 # Outputs warnings to stderr if conflicts found
+# BACKUPD-033: Now includes auto-suggest alternative times
 check_schedule_conflicts() {
   local job_name="$1"
   local backup_type="$2"
@@ -496,6 +497,10 @@ check_schedule_conflicts() {
     *) return 0 ;;  # Unknown type, skip check
   esac
 
+  # Track if any conflicts found
+  local has_conflict=false
+  local conflict_time=""
+
   # Loop through all jobs looking for conflicts
   local other_job other_schedule
   while IFS= read -r other_job; do
@@ -508,10 +513,159 @@ check_schedule_conflicts() {
     # Check for exact string match (same type, same schedule)
     if [[ -n "$other_schedule" && "$other_schedule" == "$schedule" ]]; then
       echo "Warning: Job '$other_job' also has $backup_type backup at $schedule" >&2
+      has_conflict=true
+      conflict_time=$(parse_simple_oncalendar "$schedule")
     fi
   done < <(list_jobs)
 
+  # BACKUPD-033: If conflicts found, suggest alternative times
+  if [[ "$has_conflict" == true && -n "$conflict_time" && "$conflict_time" != "hourly" ]]; then
+    local suggestions
+    suggestions=$(suggest_alternative_times "$conflict_time" "$backup_type" "$job_name")
+    if [[ -n "$suggestions" ]]; then
+      echo "Suggested alternatives:" >&2
+      while IFS= read -r suggestion; do
+        echo "  - $suggestion" >&2
+      done <<< "$suggestions"
+    fi
+  fi
+
   return 0
+}
+
+# BACKUPD-033: Parse simple OnCalendar expressions to extract hour and minute
+# Usage: parse_simple_oncalendar "*-*-* 02:30:00"
+# Returns: "02:30" for simple patterns, empty for complex patterns
+# Only handles: *-*-* HH:MM:SS or *-*-* HH:MM patterns
+parse_simple_oncalendar() {
+  local schedule="$1"
+
+  # Handle special keywords
+  case "$schedule" in
+    hourly) echo "hourly"; return 0 ;;
+    daily) echo "00:00"; return 0 ;;
+  esac
+
+  # Match simple daily pattern: *-*-* HH:MM:SS or *-*-* HH:MM
+  if [[ "$schedule" =~ ^\*-\*-\*[[:space:]]+([0-9]{1,2}):([0-9]{2})(:[0-9]{2})?$ ]]; then
+    printf "%02d:%02d" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return 0
+  fi
+
+  # Complex pattern (day-specific, intervals, etc.) - return empty
+  return 1
+}
+
+# BACKUPD-033: Find all time slots used by a backup type across all jobs
+# Usage: find_used_time_slots "db" "exclude_job_name"
+# Returns: Newline-separated list of used times (HH:MM format)
+find_used_time_slots() {
+  local backup_type="$1"
+  local exclude_job="$2"
+
+  local config_key
+  case "$backup_type" in
+    db) config_key="SCHEDULE_DB" ;;
+    files) config_key="SCHEDULE_FILES" ;;
+    verify) config_key="SCHEDULE_VERIFY" ;;
+    verify-full) config_key="SCHEDULE_VERIFY_FULL" ;;
+    *) return 0 ;;
+  esac
+
+  local job_name schedule time_slot
+  while IFS= read -r job_name; do
+    [[ "$job_name" == "$exclude_job" ]] && continue
+    schedule=$(get_job_config "$job_name" "$config_key")
+    [[ -z "$schedule" ]] && continue
+
+    time_slot=$(parse_simple_oncalendar "$schedule")
+    [[ -n "$time_slot" && "$time_slot" != "hourly" ]] && echo "$time_slot"
+  done < <(list_jobs)
+}
+
+# BACKUPD-033: Suggest alternative schedule times when conflicts detected
+# Usage: suggest_alternative_times "02:00" "db"
+# Returns: JSON array of suggested OnCalendar expressions
+# Suggests: ±30min, ±1hr, ±2hr from conflict time
+suggest_alternative_times() {
+  local conflict_time="$1"
+  local backup_type="$2"
+  local exclude_job="$3"
+
+  # Skip if hourly or complex pattern
+  [[ "$conflict_time" == "hourly" || -z "$conflict_time" ]] && return 0
+
+  # Parse hour and minute
+  local hour minute
+  hour=$(echo "$conflict_time" | cut -d: -f1 | sed 's/^0//')
+  minute=$(echo "$conflict_time" | cut -d: -f2 | sed 's/^0//')
+
+  # Get all used time slots
+  local used_slots
+  used_slots=$(find_used_time_slots "$backup_type" "$exclude_job" | sort -u)
+
+  # Generate candidate times: -2h, -1h, -30m, +30m, +1h, +2h
+  local candidates=()
+  local h m candidate
+
+  # -2 hours
+  h=$(( (hour + 22) % 24 ))
+  candidate=$(printf "%02d:%02d" "$h" "$minute")
+  candidates+=("$candidate")
+
+  # -1 hour
+  h=$(( (hour + 23) % 24 ))
+  candidate=$(printf "%02d:%02d" "$h" "$minute")
+  candidates+=("$candidate")
+
+  # -30 minutes
+  if [[ $minute -ge 30 ]]; then
+    m=$((minute - 30))
+    h=$hour
+  else
+    m=$((minute + 30))
+    h=$(( (hour + 23) % 24 ))
+  fi
+  candidate=$(printf "%02d:%02d" "$h" "$m")
+  candidates+=("$candidate")
+
+  # +30 minutes
+  if [[ $minute -lt 30 ]]; then
+    m=$((minute + 30))
+    h=$hour
+  else
+    m=$((minute - 30))
+    h=$(( (hour + 1) % 24 ))
+  fi
+  candidate=$(printf "%02d:%02d" "$h" "$m")
+  candidates+=("$candidate")
+
+  # +1 hour
+  h=$(( (hour + 1) % 24 ))
+  candidate=$(printf "%02d:%02d" "$h" "$minute")
+  candidates+=("$candidate")
+
+  # +2 hours
+  h=$(( (hour + 2) % 24 ))
+  candidate=$(printf "%02d:%02d" "$h" "$minute")
+  candidates+=("$candidate")
+
+  # Filter out used times and output suggestions
+  local suggestions=()
+  for candidate in "${candidates[@]}"; do
+    # Check if this time is already used
+    if ! echo "$used_slots" | grep -q "^${candidate}$"; then
+      suggestions+=("*-*-* ${candidate}:00")
+    fi
+  done
+
+  # Return up to 4 unique suggestions
+  local count=0
+  for suggestion in "${suggestions[@]}"; do
+    [[ $count -ge 4 ]] && break
+    echo "$suggestion"
+    ((count++))
+  done
 }
 
 # List all schedules across all jobs

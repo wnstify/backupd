@@ -2708,25 +2708,36 @@ cli_job_schedule() {
   # Redirect create_job_timer output when JSON mode
   if is_json_output; then
     if create_job_timer "$job_name" "$backup_type" "$schedule" >/dev/null 2>&1; then
-      # BACKUPD-022: Check for schedule conflicts and capture warnings
-      local conflict_warnings
-      conflict_warnings=$(check_schedule_conflicts "$job_name" "$backup_type" "$schedule" 2>&1)
+      # BACKUPD-022/033: Check for schedule conflicts and capture warnings/suggestions
+      local conflict_output
+      conflict_output=$(check_schedule_conflicts "$job_name" "$backup_type" "$schedule" 2>&1)
 
-      if [[ -n "$conflict_warnings" ]]; then
-        # Build JSON array from warnings
+      if [[ -n "$conflict_output" ]]; then
+        # BACKUPD-033: Separate warnings from suggestions
         local warnings_json="["
-        local first=true
-        while IFS= read -r warning_line; do
-          if [[ "$first" == "true" ]]; then
-            first=false
-          else
-            warnings_json+=","
+        local suggestions_json="["
+        local first_warn=true first_sugg=true
+        while IFS= read -r line; do
+          if [[ "$line" == Warning:* ]]; then
+            [[ "$first_warn" == "true" ]] || warnings_json+=","
+            first_warn=false
+            warnings_json+="\"$line\""
+          elif [[ "$line" == "  - "*"-"* ]]; then
+            # Suggestion line (schedule format)
+            local suggestion="${line#  - }"
+            [[ "$first_sugg" == "true" ]] || suggestions_json+=","
+            first_sugg=false
+            suggestions_json+="\"$suggestion\""
           fi
-          # Escape the warning message for JSON
-          warnings_json+="\"$warning_line\""
-        done <<< "$conflict_warnings"
+        done <<< "$conflict_output"
         warnings_json+="]"
-        echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\", \"warnings\": $warnings_json}"
+        suggestions_json+="]"
+
+        if [[ "$suggestions_json" != "[]" ]]; then
+          echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\", \"warnings\": $warnings_json, \"suggestions\": $suggestions_json}"
+        else
+          echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\", \"warnings\": $warnings_json}"
+        fi
       else
         echo "{\"job\": \"$job_name\", \"backup_type\": \"$backup_type\", \"timer\": \"$timer_name\", \"schedule\": \"$schedule\", \"status\": \"created\"}"
       fi
