@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.4] - 2026-01-09
+
+### Added
+
+- **Multi-distribution package manager support** — Automatic detection and installation of dependencies across 6 package managers
+  - apt (Debian, Ubuntu, Mint, Pop!_OS, Kali, Raspbian)
+  - dnf (Fedora, RHEL 8+, Rocky Linux, AlmaLinux, Amazon Linux)
+  - yum (RHEL 7, CentOS 7, Oracle Linux)
+  - pacman (Arch Linux, Manjaro, EndeavourOS, Artix)
+  - apk (Alpine Linux)
+  - zypper (openSUSE, SLES)
+
+- **wget fallback support** — All HTTP operations now work with either curl or wget (BACKUPD-007)
+  - `download_to_file()` helper with curl/wget fallback
+  - `fetch_url()` helper with curl/wget fallback
+  - Updated `curl_with_retry()` with wget fallback
+  - Updated `check_network()` with wget fallback
+  - Updated `get_latest_version()` with wget fallback
+
+- **Explicit dependency checks** — Added sha256sum and base64 to required commands validation
+
+### Improved
+
+- **Unsupported distribution handling** — Graceful warnings with manual install instructions instead of failures (BACKUPD-005)
+- **Error messages** — Distro-appropriate install hints via `get_install_hint()` function (BACKUPD-006)
+- **bzip2 installation** — Now uses package manager abstraction for RHEL-family distros (BACKUPD-002)
+- **unzip installation** — Cross-distribution support via package manager abstraction (BACKUPD-004)
+- **argon2 installation** — Works across all 6 supported package managers (BACKUPD-003)
+- **systemd detection** — Improved messaging when systemd/systemctl not available
+
+### Technical
+
+- Added `detect_package_manager()` function with caching
+- Added `pkg_install()` abstraction for cross-distro package installation
+- Added `pkg_update()` with run-once semantics
+- Added `get_install_hint()` for user-friendly error messages
+- Removed hardcoded `apt-get` calls in favor of package manager abstraction
+
+---
+
 ## [3.1.3] - 2026-01-09
 
 ### Fixed

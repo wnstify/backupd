@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v3.1.3** by Backupd.
+Complete usage documentation for **Backupd v3.1.4** by Backupd.
 
 > **Note:** v3.1.0 adds multi-job support for managing multiple backup configurations.
 > v3.0.0 introduced restic as the backup engine, replacing GPG+tar+pigz.
@@ -57,13 +57,16 @@ The following will be **automatically installed** if missing:
 These packages are typically already available on most Linux systems:
 - `openssl` - credential encryption
 - `tar` - archive operations
-- `curl` - notifications
+- `curl` or `wget` - downloads and notifications (at least one required)
+- `sha256sum` - checksum verification
+- `base64` - encoding operations
 
 ### Verify prerequisites (optional)
 
 ```bash
 # Check tools (these are usually pre-installed)
-which openssl tar curl
+which openssl tar sha256sum base64
+which curl || which wget  # At least one required
 
 # After installation, verify auto-installed tools
 which restic rclone

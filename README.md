@@ -62,6 +62,7 @@ This tool provides exactly that.
 - 🗄️ **Database Backups** — All MySQL/MariaDB databases, individually compressed and encrypted
 - 📁 **Web App File Backups** — Backs up any web application (WordPress, Laravel, Node.js, PHP, static sites)
 - 🖥️ **Multi-Panel Support** — Auto-detects Enhance, xCloud, RunCloud, Ploi, cPanel, Plesk, CloudPanel, CyberPanel, aaPanel, HestiaCP, Virtualmin
+- 🐧 **Multi-Distribution Support** — Works on Debian, Ubuntu, Fedora, RHEL, CentOS, Arch, Alpine, openSUSE and derivatives
 - 🔐 **Machine-Bound Encryption** — Credentials encrypted with AES-256, tied to your server
 - ☁️ **Cloud Storage** — Supports 40+ providers via rclone (S3, B2, Wasabi, Google Drive, etc.)
 - ⏰ **Automated Scheduling** — Systemd timers with automatic retry and catch-up
@@ -100,13 +101,15 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 
 | Requirement | Notes |
 |-------------|-------|
-| **OS** | Ubuntu 20.04+, Debian 10+ (or compatible) |
+| **OS** | Ubuntu, Debian, Fedora, RHEL, CentOS, Arch, Alpine, openSUSE (and derivatives) |
 | **Access** | Root or sudo |
 | **MySQL/MariaDB** | For database backups |
-| **systemd** | For scheduled backups |
+| **systemd** | For scheduled backups (optional, manual backups work without) |
+| **curl or wget** | At least one required for downloads |
 | **restic** | Auto-installed (backup engine with encryption + deduplication) |
 | **rclone** | Auto-installed (cloud storage transport) |
 | **argon2** | Auto-installed (modern encryption, falls back to PBKDF2 if unavailable) |
+| **bzip2, unzip** | Auto-installed (for extracting restic and rclone) |
 
 ---
 
