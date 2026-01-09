@@ -2668,6 +2668,17 @@ cli_job_schedule() {
     return 2
   fi
 
+  # BACKUPD-019: Validate schedule format before creating timer
+  if ! validate_schedule_format "$schedule" 2>/dev/null; then
+    if is_json_output; then
+      echo "{\"error\": \"Invalid schedule format\", \"schedule\": \"$schedule\", \"hint\": \"Test with: systemd-analyze calendar '$schedule'\"}"
+    else
+      print_error "Invalid schedule format: $schedule"
+      echo "Hint: Test with: systemd-analyze calendar '$schedule'"
+    fi
+    return 6
+  fi
+
   local timer_name
   timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
 
