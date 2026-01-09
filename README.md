@@ -61,7 +61,7 @@ This tool provides exactly that.
 
 - 🗄️ **Database Backups** — All MySQL/MariaDB databases, individually compressed and encrypted
 - 📁 **Web App File Backups** — Backs up any web application (WordPress, Laravel, Node.js, PHP, static sites)
-- 🖥️ **Multi-Panel Support** — Auto-detects Enhance, xCloud, RunCloud, Ploi, cPanel, Plesk, CloudPanel, CyberPanel, aaPanel, HestiaCP, Virtualmin
+- 🖥️ **Multi-Panel Support** — Auto-detects Enhance, xCloud, RunCloud, Ploi, cPanel, Plesk, CloudPanel, CyberPanel, aaPanel, HestiaCP, FlashPanel, Virtualmin
 - 🐧 **Multi-Distribution Support** — Works on Debian, Ubuntu, Fedora, RHEL, CentOS, Arch, Alpine, openSUSE and derivatives
 - 🔐 **Machine-Bound Encryption** — Credentials encrypted with AES-256, tied to your server
 - ☁️ **Cloud Storage** — Supports 40+ providers via rclone (S3, B2, Wasabi, Google Drive, etc.)

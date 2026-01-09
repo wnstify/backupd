@@ -27,6 +27,7 @@ Complete usage documentation for **Backupd v3.1.4** by Backupd.
 - [API and GUI Integration](#api-and-gui-integration)
 - [Logging & Debugging](#logging--debugging)
 - [Advanced Configuration](#advanced-configuration)
+  - [Supported Panels](#supported-panels)
 - [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
 
@@ -1787,6 +1788,56 @@ The path to encrypted credentials is stored in:
 ```
 
 This points to a randomly-named directory like `/etc/.a7x9m2k4q1/`
+
+### Supported Panels
+
+Backupd auto-detects the following hosting control panels and their site directory structures:
+
+| Panel | Directory Pattern | Detection Method |
+|-------|-------------------|------------------|
+| **Enhance** | `/var/www/*/public_html` | Service |
+| **xCloud** | `/var/www/*` | User |
+| **RunCloud** | `/home/*/webapps/*` | User |
+| **Ploi** | `/home/*/*` | User |
+| **cPanel** | `/home/*/public_html` | File |
+| **Plesk** | `/var/www/vhosts/*/httpdocs` | Service |
+| **CloudPanel** | `/home/*/htdocs/*` | Service |
+| **CyberPanel** | `/home/*/public_html` | Service |
+| **aaPanel** | `/www/wwwroot/*` | Service |
+| **HestiaCP** | `/home/*/web/*/public_html` | Service |
+| **FlashPanel** | `/home/flashpanel/*` | Service |
+| **FlashPanel (Isolated)** | `/home/*/*` | Service |
+| **Virtualmin** | `/home/*/public_html` | File |
+| **Custom** | `/var/www/*` | None |
+
+#### FlashPanel Support
+
+FlashPanel supports two hosting modes, and Backupd automatically detects which mode your server uses:
+
+**Non-Isolated Mode** (Standard):
+- All sites are stored under a single `flashpanel` user
+- Directory pattern: `/home/flashpanel/{site}`
+- Example paths:
+  - `/home/flashpanel/example.com`
+  - `/home/flashpanel/myapp.io`
+
+**Isolated Mode**:
+- Each site has its own system user for enhanced security
+- Directory pattern: `/home/{user}/{site}`
+- Example paths:
+  - `/home/john/example.com`
+  - `/home/jane/myapp.io`
+
+During setup, Backupd will:
+1. Automatically detect FlashPanel by checking for the `flashpanel` service or the agent binary at `/root/.flashpanel/agent/flashpanel`
+2. Determine the isolation mode by checking if `/home/flashpanel/` exists with site subdirectories
+3. Display the detected mode and allow you to confirm or switch modes
+
+**Manual Mode Selection:**
+If auto-detection doesn't match your setup, you can manually select your FlashPanel mode from the panel selection menu during setup.
+
+**Customizing Webroot Subdirectory:**
+If your sites use a deeper directory structure (e.g., `/home/flashpanel/example.com/public`), you can customize the webroot subdirectory during setup via the `WEBROOT_SUBDIR` configuration option.
 
 ### Modifying Backup Scripts
 
