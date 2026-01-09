@@ -134,7 +134,8 @@ validate_path() {
   fi
 
   # Check for dangerous characters (shell metacharacters)
-  if [[ "$path" =~ [\'\"$\`\;\|\&\>\<\(\)\{\}\[\]\\] ]]; then
+  # Note: [] allowed - valid in filenames, not dangerous when paths are quoted
+  if [[ "$path" =~ [\'\"$\`\;\|\&\>\<\(\)\{\}\\] ]]; then
     print_error "$name contains invalid characters"
     return 1
   fi
@@ -234,7 +235,8 @@ check_disk_space() {
   available_mb=$(df -m "$path" 2>/dev/null | awk 'NR==2 {print $4}')
 
   if [[ -z "$available_mb" ]]; then
-    print_warning "Could not check disk space"
+    print_warning "Could not check disk space - proceeding anyway"
+    log_warn "df output could not be parsed for path: $path"
     return 0
   fi
 
@@ -251,8 +253,9 @@ check_network() {
   local host="${1:-1.1.1.1}"
   local timeout="${2:-5}"
 
-  if ! ping -c 1 -W "$timeout" "$host" &>/dev/null; then
-    if ! curl -s --connect-timeout "$timeout" "https://www.google.com" &>/dev/null; then
+  # Try curl first (ICMP often blocked on servers)
+  if ! curl -s --connect-timeout "$timeout" "https://www.google.com" &>/dev/null; then
+    if ! ping -c 1 -W "$timeout" "$host" &>/dev/null; then
       print_error "No network connectivity"
       return 1
     fi
@@ -398,6 +401,7 @@ is_service_running() {
 }
 
 # Check if a file/directory pattern exists
+# Requires Bash (uses compgen builtin)
 pattern_exists() {
   local pattern="$1"
   compgen -G "$pattern" >/dev/null 2>&1
