@@ -36,7 +36,7 @@
       "title": "argon2 Installation Across Distros",
       "description": "As a security-conscious user on Arch Linux, I want argon2 to install automatically so that I get Argon2id encryption without manual setup.",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "argon2 installs via pacman -S --noconfirm argon2 on Arch",
         "argon2 installs via apk add argon2 on Alpine",
@@ -49,7 +49,7 @@
       "title": "unzip Installation Across Distros",
       "description": "As a user on Fedora, I want unzip to install automatically during rclone installation so that remote sync setup works seamlessly.",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "unzip installs via appropriate package manager on all supported distros",
         "Both install.sh and lib/core.sh use the abstraction"

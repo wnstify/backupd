@@ -39,3 +39,39 @@ Iteration: 2
   - The bzip2 installation is triggered automatically during restic installation, not as a separate step
   - The `-q` (quiet) flag on dnf/yum is acceptable - matches acceptance criteria intent
 ---
+
+## 2026-01-09 - US-003
+Iteration: 3
+- Implemented argon2 installation across distros (error messages now show distro-appropriate commands)
+- argon2 installation via `pkg_install argon2` already works in install.sh (from US-001)
+- Updated hardcoded "sudo apt install argon2" messages to use `get_install_hint argon2`
+- Files changed:
+  - `backupd.sh` - Updated show_encryption_status() line 362 and do_migrate_encryption() line 395
+  - `lib/crypto.sh` - Updated migrate_secrets() line 377
+  - `prd.json` - Marked US-003 as passes: true
+- **Learnings for future iterations:**
+  - `lib/core.sh` is sourced before `lib/crypto.sh`, so `get_install_hint()` is available in crypto.sh
+  - The acceptance criteria check specific commands (pacman/apk/zypper) - but actual implementation uses `pkg_install` wrapper which handles all distros
+  - Error message updates are often in both `backupd.sh` (CLI) and lib modules (shared functions)
+---
+
+## 2026-01-09 - US-004
+Iteration: 4
+- Verified unzip installation already implemented in US-001
+- Both files use `pkg_install unzip` for multi-distro support:
+  - `install.sh:432` - Uses `pkg_install unzip || true` in rclone installation
+  - `lib/core.sh:884` - Uses `pkg_install unzip || true` in rclone installation
+- The `pkg_install` function correctly handles unzip installation via:
+  - `apt-get install -y -qq unzip` (Debian/Ubuntu)
+  - `dnf install -y -q unzip` (RHEL 8+, Fedora, AlmaLinux, Rocky)
+  - `yum install -y -q unzip` (RHEL 7, CentOS 7)
+  - `pacman -S --noconfirm --needed unzip` (Arch)
+  - `apk add --quiet unzip` (Alpine)
+  - `zypper install -y -q unzip` (openSUSE)
+- Files changed:
+  - `prd.json` - Marked US-004 as passes: true (implementation verified from US-001)
+- **Learnings for future iterations:**
+  - Similar to US-002, this was already implemented - pattern: verify existing code before writing new
+  - The unzip installation is triggered on-demand when extraction fails, with automatic retry after install
+  - No remaining hardcoded `apt-get` or `apt` calls for unzip in any .sh files
+---
