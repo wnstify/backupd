@@ -1,4 +1,26 @@
-# Exclude from release archives (export-ignore)
-docs/ export-ignore
-.github/ export-ignore
-.gitattributes export-ignore
+# ============================================================================
+# Git Attributes - Release Archive Configuration
+# ============================================================================
+# Files marked with 'export-ignore' are excluded from `git archive` output
+# (GitHub release source archives, manual tar.gz creation)
+# ============================================================================
+
+# ----- Git Configuration -----
+.gitattributes     export-ignore
+.gitignore         export-ignore
+
+# ----- GitHub Specific -----
+.github/           export-ignore
+
+# ----- Development & Planning -----
+.claude/           export-ignore
+.audit/            export-ignore
+tasks/             export-ignore
+scripts/           export-ignore
+api-plan.md        export-ignore
+CLAUDE.md          export-ignore
+
+# ----- Documentation (keep only user-facing) -----
+# README.md, USAGE.md, CHANGELOG.md, LICENSE, DISCLAIMER.md, SECURITY.md → included
+# DEBUG.md → included (useful for troubleshooting)
+docs/              export-ignore
