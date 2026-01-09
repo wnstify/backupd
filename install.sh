@@ -286,9 +286,14 @@ install_dependencies() {
     local pm
     pm=$(detect_package_manager)
     if [[ "$pm" == "unknown" ]]; then
-        echo -e "  ${YELLOW}Warning: Unsupported distribution detected${NC}"
-        echo -e "  ${YELLOW}Please install manually: bzip2, unzip, argon2 (optional)${NC}"
+        echo -e "  ${YELLOW}Warning: Unsupported/unrecognized distribution detected${NC}"
+        echo -e "  ${YELLOW}Automatic package installation is not available.${NC}"
+        echo -e "  ${YELLOW}Please install required packages manually:${NC}"
+        echo -e "  ${YELLOW}  - bzip2 (required for restic extraction)${NC}"
+        echo -e "  ${YELLOW}  - unzip (required for rclone extraction)${NC}"
+        echo -e "  ${YELLOW}  - argon2 (optional, for Argon2id encryption)${NC}"
         echo -e "  ${YELLOW}Continuing without package installation...${NC}"
+        echo ""
     else
         echo -e "  Package manager: ${GREEN}${pm}${NC}"
         # Update package list (suppress output)
@@ -310,9 +315,12 @@ install_dependencies() {
     fi
 
     # Install argon2 for modern encryption (recommended)
+    # Skip automatic install attempt on unsupported distros
     if ! command -v argon2 &> /dev/null; then
-        echo -e "  Installing argon2 (for modern encryption)..."
-        pkg_install argon2 || echo -e "  ${YELLOW}argon2 install failed - will use PBKDF2 fallback${NC}"
+        if [[ "$pm" != "unknown" ]]; then
+            echo -e "  Installing argon2 (for modern encryption)..."
+            pkg_install argon2 || echo -e "  ${YELLOW}argon2 install failed - will use PBKDF2 fallback${NC}"
+        fi
     fi
     if command -v argon2 &> /dev/null; then
         echo -e "  argon2: ${GREEN}OK${NC} (Argon2id encryption enabled)"
@@ -428,10 +436,18 @@ install_rclone_verified() {
     echo -e "    Installing..."
     if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
         echo -e "    ${YELLOW}Failed to extract (is unzip installed?)${NC}"
-        # Try to install unzip and retry
-        pkg_install unzip || true
+        # Try to install unzip and retry (skip on unsupported distros)
+        local pm
+        pm=$(detect_package_manager)
+        if [[ "$pm" != "unknown" ]]; then
+            pkg_install unzip || true
+        fi
         if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
-            echo -e "    ${YELLOW}Failed to extract rclone${NC}"
+            if [[ "$pm" == "unknown" ]]; then
+                echo -e "    ${YELLOW}unzip not found - please install manually${NC}"
+            else
+                echo -e "    ${YELLOW}Failed to extract rclone${NC}"
+            fi
             return 1
         fi
     fi
@@ -543,6 +559,12 @@ install_restic_verified() {
 
     # Check if bzip2 is available
     if ! command -v bunzip2 &>/dev/null; then
+        local pm
+        pm=$(detect_package_manager)
+        if [[ "$pm" == "unknown" ]]; then
+            echo -e "    ${YELLOW}bzip2 not found - please install manually${NC}"
+            return 1
+        fi
         echo -e "    Installing bzip2..."
         pkg_install bzip2 || {
             echo -e "    ${YELLOW}Failed to install bzip2${NC}"

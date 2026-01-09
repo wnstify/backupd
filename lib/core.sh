@@ -880,10 +880,18 @@ install_rclone_verified() {
   echo "  Installing..."
   if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
     print_warning "Failed to extract (is unzip installed?)"
-    # Try to install unzip and retry
-    pkg_install unzip || true
+    # Try to install unzip and retry (skip on unsupported distros)
+    local pm
+    pm=$(detect_package_manager)
+    if [[ "$pm" != "unknown" ]]; then
+      pkg_install unzip || true
+    fi
     if ! unzip -q "${temp_dir}/${filename}" -d "${temp_dir}" 2>/dev/null; then
-      print_error "Failed to extract rclone"
+      if [[ "$pm" == "unknown" ]]; then
+        print_warning "unzip not found - please install manually"
+      else
+        print_error "Failed to extract rclone"
+      fi
       return 1
     fi
   fi
