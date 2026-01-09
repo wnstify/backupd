@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Signal Handling for Child Processes (BACKUPD-036)** — Prevents orphaned repository locks
+  - `backupd_cleanup()` — Cleanup handler terminates restic/rclone on exit
+  - EXIT trap — Runs cleanup on normal script termination
+  - INT trap (Ctrl+C) — Graceful exit with code 130
+  - TERM trap — Graceful exit with code 143
+  - `pkill -P $$ restic/rclone` — Kills child processes by parent PID
+  - Prevents stale locks when user cancels backup/verify operations
+
 - **Schedule Conflict Auto-Suggest (BACKUPD-033)** — Intelligent alternative time suggestions when conflicts detected
   - `parse_simple_oncalendar()` — Extracts hour/minute from OnCalendar expressions
   - `find_used_time_slots()` — Discovers occupied time slots across all jobs
@@ -35,6 +43,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SCHEDULE_TEMPLATES` associative array in lib/schedule.sh
   - Helper functions: `get_template_schedule()`, `get_template_display()`, `get_template_description()`, `detect_template_name()`, `list_schedule_templates()`
 
+### Fixed
+
+- **Bulk Schedule Operations (BACKUPD-034)**
+  - Fixed silent exit when `((count++))` returns 1 with `set -e`
+  - Fixed argument shifting when `--all` flag is used
+  - Jobs without backup type configured now show "skipped" instead of "failed"
+  - Added `jobs_skipped` count to JSON output
+  - Exit code 0 when no actual failures occur
+
+- **Schedule Templates (BACKUPD-035)**
+  - Fixed unbound variable error when template name argument is missing
+  - Fixed crash when accessing non-existent template name
+  - Use `[[ -v ]]` to safely check associative array key existence
+
 ### Changed
 
 - **`check_schedule_conflicts()`** — Now includes auto-suggest functionality
@@ -48,11 +70,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Technical
 
+- **lib/core.sh** — Added signal handling section with cleanup function (~50 lines)
 - **lib/jobs.sh** — Added 4 new functions for conflict auto-suggest (~135 lines)
 - **lib/jobs.sh** — Added 2 new functions for bulk operations (~100 lines)
 - **lib/schedule.sh** — Added SCHEDULE_TEMPLATES and 5 helper functions (~75 lines)
 - **lib/cli.sh** — Extended cli_job_schedule() with --template flag and bulk operation modes (~160 lines)
 - **lib/cli.sh** — Added cli_schedule_templates() with list/show subcommands (~105 lines)
+- **lib/cli.sh** — Fixed argument parsing and counter operations in bulk schedule
 
 ---
 
