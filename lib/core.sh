@@ -27,6 +27,55 @@ QUIET_MODE=${QUIET_MODE:-0}
 JSON_OUTPUT=${JSON_OUTPUT:-0}
 DRY_RUN=${DRY_RUN:-0}
 
+# ---------- Signal Handling & Cleanup ----------
+
+# Track child processes for cleanup
+declare -a BACKUPD_CHILD_PIDS=()
+
+# Cleanup function called on exit/interrupt
+# Terminates any child processes (restic, rclone) to prevent orphaned locks
+backupd_cleanup() {
+    local exit_code=$?
+
+    # Kill any tracked child processes
+    for pid in "${BACKUPD_CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null
+            # Give process time to cleanup gracefully
+            sleep 0.5
+            # Force kill if still running
+            kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+        fi
+    done
+
+    # Kill any restic processes spawned by this script
+    pkill -P $$ restic 2>/dev/null
+    pkill -P $$ rclone 2>/dev/null
+
+    return $exit_code
+}
+
+# Register cleanup handler (only if not already registered)
+if [[ -z "${BACKUPD_TRAP_SET:-}" ]]; then
+    trap backupd_cleanup EXIT
+    trap 'exit 130' INT   # Exit code 130 = interrupted by Ctrl+C
+    trap 'exit 143' TERM  # Exit code 143 = terminated
+    BACKUPD_TRAP_SET=1
+fi
+
+# Helper to run a command and track its PID for cleanup
+# Usage: run_tracked_command restic check -r "$repo"
+run_tracked_command() {
+    "$@" &
+    local pid=$!
+    BACKUPD_CHILD_PIDS+=("$pid")
+    wait "$pid"
+    local exit_code=$?
+    # Remove PID from tracking array
+    BACKUPD_CHILD_PIDS=("${BACKUPD_CHILD_PIDS[@]/$pid/}")
+    return $exit_code
+}
+
 # ---------- Package Manager Functions ----------
 
 # Package manager detection (cached)
