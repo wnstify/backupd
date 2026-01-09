@@ -486,6 +486,11 @@ create_job_timer() {
 
   validate_job_name "$job_name" || return 1
 
+  # Validate schedule format before proceeding
+  if ! validate_schedule_format "$schedule"; then
+    return 1
+  fi
+
   if ! job_exists "$job_name"; then
     print_error "Job '$job_name' does not exist"
     return 1
