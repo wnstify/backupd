@@ -130,9 +130,14 @@ log_redact() {
   # Return empty if input is empty
   [[ -z "$input" ]] && return 0
 
+  # Enhanced: Handle quoted values with spaces (e.g., password="my secret pass")
   echo "$input" | sed -E \
-    -e 's/(password|passwd|pass|passphrase)[=:]["'"'"']?[^"'"'"' \t\n]*/\1=[REDACTED]/gi' \
-    -e 's/(token|secret|key|apikey|api_key|api-key|credential|auth)[=:]["'"'"']?[^"'"'"' \t\n]*/\1=[REDACTED]/gi' \
+    -e 's/(password|passwd|pass|passphrase)[=:]"[^"]*"/\1=[REDACTED]/gi' \
+    -e "s/(password|passwd|pass|passphrase)[=:]'[^']*'/\1=[REDACTED]/gi" \
+    -e 's/(password|passwd|pass|passphrase)[=:][^"'"'"' \t\n]*/\1=[REDACTED]/gi' \
+    -e 's/(token|secret|key|apikey|api_key|api-key|credential|auth)[=:]"[^"]*"/\1=[REDACTED]/gi' \
+    -e "s/(token|secret|key|apikey|api_key|api-key|credential|auth)[=:]'[^']*'/\1=[REDACTED]/gi" \
+    -e 's/(token|secret|key|apikey|api_key|api-key|credential|auth)[=:][^"'"'"' \t\n]*/\1=[REDACTED]/gi' \
     -e 's/(Bearer|Basic) [A-Za-z0-9_-]+/\1 [REDACTED]/gi' \
     -e 's/(Authorization:) [^ \t\n]+/\1 [REDACTED]/gi' \
     -e "s/-p'[^']*'/-p'[REDACTED]'/g" \
@@ -310,6 +315,9 @@ log_func_exit() {
   # Pop from timing stack
   local duration_ms=""
   if [[ ${#_LOG_FUNC_START_TIMES[@]} -gt 0 ]]; then
+    if [[ "${_LOG_FUNC_NAMES[-1]}" != "$func_name" ]]; then
+      log_trace "Function exit mismatch: expected ${_LOG_FUNC_NAMES[-1]}, got $func_name"
+    fi
     local start_time="${_LOG_FUNC_START_TIMES[-1]}"
     local end_time
     end_time=$(date +%s%N 2>/dev/null || date +%s)
