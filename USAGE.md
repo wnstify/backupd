@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v3.2.0** by Backupd.
+Complete usage documentation for **Backupd v3.2.1** by Backupd.
 
 > **Note:** v3.1.0 adds multi-job support for managing multiple backup configurations.
 > v3.0.0 introduced restic as the backup engine, replacing GPG+tar+pigz.
@@ -957,6 +957,84 @@ Mon..Fri *-*-* 06:00:00
 **Test your expression:**
 ```bash
 systemd-analyze calendar "*-*-* 03:30:00"
+```
+
+### CLI Schedule Management (v3.2.0+)
+
+Manage schedules from the command line without entering the interactive menu.
+
+#### Schedule Templates (v3.2.1+)
+
+View and use built-in schedule templates:
+
+```bash
+# List all available templates
+backupd schedule templates
+
+# Show template details
+backupd schedule templates show daily_2am
+
+# Available templates:
+#   hourly, every_2h, every_6h, daily_midnight, daily_1am, daily_2am,
+#   daily_3am, daily_4am, weekly_sun_2am, weekly_sat_3am, biweekly, monthly
+```
+
+#### Per-Job Scheduling
+
+Set schedules for individual jobs:
+
+```bash
+# Set database backup schedule using template
+backupd job schedule production db --template daily_2am
+
+# Set database backup schedule using OnCalendar expression
+backupd job schedule production db "*-*-* 02:00:00"
+
+# Set files backup schedule
+backupd job schedule production files "*-*-* 03:00:00"
+
+# Show current schedules for a job
+backupd job schedule production --show
+
+# Disable a specific schedule
+backupd job schedule production db --disable
+
+# JSON output for automation
+backupd job schedule production --show --json
+```
+
+#### Bulk Schedule Operations (v3.2.1+)
+
+Set or disable schedules across all jobs at once:
+
+```bash
+# Set database backup schedule for ALL jobs
+backupd job schedule --all db "*-*-* 02:00:00"
+
+# Set files backup using a template for ALL jobs
+backupd job schedule --all files --template daily_3am
+
+# Disable database backup for ALL jobs
+backupd job schedule --all db --disable
+
+# Show all schedules across all jobs
+backupd job schedule --all
+
+# JSON output for bulk operations
+backupd job schedule --all db "*-*-* 02:00:00" --json
+```
+
+#### Schedule Conflict Detection (v3.2.1+)
+
+When you set a schedule that conflicts with another job, backupd automatically suggests alternatives:
+
+```
+Warning: Job 'staging' also has db backup at *-*-* 02:00:00
+Suggested alternatives:
+  - *-*-* 00:00:00
+  - *-*-* 01:30:00
+  - *-*-* 02:30:00
+  - *-*-* 03:00:00
 ```
 
 ---

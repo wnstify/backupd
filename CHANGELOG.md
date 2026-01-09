@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.1] - 2026-01-09
+
+### Added
+
+- **Schedule Conflict Auto-Suggest (BACKUPD-033)** — Intelligent alternative time suggestions when conflicts detected
+  - `parse_simple_oncalendar()` — Extracts hour/minute from OnCalendar expressions
+  - `find_used_time_slots()` — Discovers occupied time slots across all jobs
+  - `suggest_alternative_times()` — Generates conflict-free alternative schedules
+  - Suggests ±30min, ±1hr, ±2hr alternatives automatically
+  - Filters suggestions to exclude already-used time slots
+  - JSON output includes separate `warnings` and `suggestions` arrays
+
+- **Bulk Schedule Operations (BACKUPD-034)** — Set or disable schedules across all jobs at once
+  - `backupd job schedule --all db '*-*-* 02:00:00'` — Set database backup schedule for all jobs
+  - `backupd job schedule --all files --disable` — Disable files backup for all jobs
+  - `create_all_job_schedules()` — Bulk schedule creation function
+  - `disable_all_job_schedules()` — Bulk schedule disabling function
+  - JSON output with operation details and per-job results
+  - Follows `regenerate_all_job_scripts()` pattern for consistency
+
+- **Schedule Templates/Presets (BACKUPD-035)** — Reusable schedule configurations
+  - 12 built-in templates: hourly, every_2h, every_6h, daily_midnight, daily_1am, daily_2am, daily_3am, daily_4am, weekly_sun_2am, weekly_sat_3am, biweekly, monthly
+  - `backupd schedule templates` — List all available templates
+  - `backupd schedule templates show <name>` — Show template details
+  - `backupd job schedule <job> <type> --template <name>` — Apply template to job
+  - `SCHEDULE_TEMPLATES` associative array in lib/schedule.sh
+  - Helper functions: `get_template_schedule()`, `get_template_display()`, `get_template_description()`, `detect_template_name()`, `list_schedule_templates()`
+
+### Changed
+
+- **`check_schedule_conflicts()`** — Now includes auto-suggest functionality
+  - Outputs suggested alternatives after conflict warnings
+  - Maintains backward compatibility (still advisory, returns 0)
+
+- **`--all` flag in `cli_job_schedule()`** — Extended to support SET and DISABLE modes
+  - Original SHOW behavior preserved when no backup_type specified
+  - New SET mode: `--all <type> <schedule>`
+  - New DISABLE mode: `--all <type> --disable`
+
+### Technical
+
+- **lib/jobs.sh** — Added 4 new functions for conflict auto-suggest (~135 lines)
+- **lib/jobs.sh** — Added 2 new functions for bulk operations (~100 lines)
+- **lib/schedule.sh** — Added SCHEDULE_TEMPLATES and 5 helper functions (~75 lines)
+- **lib/cli.sh** — Extended cli_job_schedule() with --template flag and bulk operation modes (~160 lines)
+- **lib/cli.sh** — Added cli_schedule_templates() with list/show subcommands (~105 lines)
+
+---
+
 ## [3.2.0] - 2026-01-09
 
 ### Added
@@ -1417,6 +1466,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.2.1 | 2026-01-09 | **Schedule auto-suggest**, bulk operations, 12 schedule templates |
 | 3.2.0 | 2026-01-09 | **Per-job scheduling CLI**, schedule validation, FlashPanel auto-detection |
 | 3.1.4 | 2026-01-09 | Multi-distribution package manager support (6 distros), wget fallback |
 | 3.1.3 | 2026-01-09 | 19 bug fixes across logging, crypto, core, CLI modules |
