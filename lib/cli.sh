@@ -2886,7 +2886,8 @@ Options:
   --json            Output in JSON format
   --dry-run, -n     Preview what would be executed (for run)
   --force, -f       Force operation (for delete)
-  --all, -a         Apply to all jobs (for regenerate)
+  --all, -a         Apply to all jobs (for regenerate), or
+                    show all schedules across all jobs (for schedule)
   --show, -s        Show current schedule (for schedule)
   --disable, -d     Disable timer without removing config (for schedule)
   --help, -h        Show this help message
@@ -2920,6 +2921,7 @@ Examples:
   backupd job schedule prod --show      # Show all schedules
   backupd job schedule prod db --disable
                                         # Disable db timer
+  backupd job schedule --all            # Show all schedules across all jobs
 
 After creating a job, configure it with the interactive menu:
   sudo backupd
