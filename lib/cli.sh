@@ -2515,13 +2515,14 @@ cli_job_timers() {
 
 cli_job_schedule() {
   local job_name="" backup_type="" schedule=""
-  local show_mode=false disable_mode=false
+  local show_mode=false disable_mode=false all_mode=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --json) JSON_OUTPUT=1 ;;
       --show|-s) show_mode=true ;;
       --disable|-d) disable_mode=true ;;
+      --all|-a) all_mode=true ;;
       --help|-h) cli_job_help; return 0 ;;
       -*) print_error "Unknown option: $1"; return $EXIT_USAGE ;;
       *)
@@ -2536,6 +2537,28 @@ cli_job_schedule() {
     esac
     shift
   done
+
+  # BACKUPD-023: Handle --all flag to show all schedules across all jobs
+  if [[ "$all_mode" == true ]]; then
+    if is_json_output; then
+      local json_output='{"schedules": ['
+      local first=true
+      while IFS='|' read -r j_name b_type sched t_status; do
+        [[ "$first" == true ]] || json_output+=','
+        first=false
+        json_output+="{\"job\": \"$j_name\", \"backup_type\": \"$b_type\", \"schedule\": \"$sched\", \"timer_status\": \"$t_status\"}"
+      done < <(list_all_job_schedules)
+      json_output+=']}'
+      echo "$json_output"
+    else
+      printf "%-20s %-12s %-25s %s\n" "JOB" "TYPE" "SCHEDULE" "STATUS"
+      printf "%-20s %-12s %-25s %s\n" "---" "----" "--------" "------"
+      while IFS='|' read -r j_name b_type sched t_status; do
+        printf "%-20s %-12s %-25s %s\n" "$j_name" "$b_type" "$sched" "$t_status"
+      done < <(list_all_job_schedules)
+    fi
+    return 0
+  fi
 
   # Validation: require job_name at minimum
   if [[ -z "$job_name" ]]; then
