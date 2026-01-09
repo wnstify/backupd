@@ -105,6 +105,10 @@ RELEASE-NOTES-v2.2.0.md
 ARCHITECTURE-EXTENSIBILITY-PLAN.md
 MENU-WORKFLOW-ANALYSIS.md
 
+# ----- Development Planning Files -----
+prd.json
+progress.txt
+
 # ----- Test Artifacts (not tracked) -----
 CODEBASE-HEALTH-REPORT.md
 COMPREHENSIVE-TEST-SUMMARY.md
