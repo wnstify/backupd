@@ -23,7 +23,7 @@
       "title": "bzip2 Installation on RHEL-family",
       "description": "As a user on Rocky Linux 9, I want bzip2 to install automatically when needed for restic extraction so that the installation completes successfully.",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "bzip2 installs via dnf install -y bzip2 on RHEL 8+/Fedora",
         "bzip2 installs via yum install -y bzip2 on RHEL 7/CentOS 7",

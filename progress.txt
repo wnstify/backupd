@@ -24,3 +24,18 @@ Iteration: 1
   - Keep package manager functions identical in both files - any changes need dual updates
   - The `lib/core.sh` is sourced by `backupd.sh`, so functions defined there are available to all lib modules
 ---
+
+## 2026-01-09 - US-002
+Iteration: 2
+- Verified bzip2 installation already implemented in US-001
+- The `install_restic_verified()` function (install.sh:545-550) calls `pkg_install bzip2` when bunzip2 is not available
+- The `pkg_install` function correctly handles:
+  - `dnf install -y -q bzip2` for RHEL 8+, Fedora, AlmaLinux, Rocky Linux (when dnf available)
+  - `yum install -y -q bzip2` for RHEL 7, CentOS 7 (when dnf not available)
+- Files changed:
+  - `prd.json` - Marked US-002 as passes: true (implementation verified from US-001)
+- **Learnings for future iterations:**
+  - Some user stories may already be satisfied by prior implementations - verify before implementing
+  - The bzip2 installation is triggered automatically during restic installation, not as a separate step
+  - The `-q` (quiet) flag on dnf/yum is acceptable - matches acceptance criteria intent
+---
