@@ -75,3 +75,21 @@ Iteration: 4
   - The unzip installation is triggered on-demand when extraction fails, with automatic retry after install
   - No remaining hardcoded `apt-get` or `apt` calls for unzip in any .sh files
 ---
+
+## 2026-01-09 - US-005
+Iteration: 5
+- Implemented unsupported distribution handling with graceful skip and helpful messages
+- Updated `install_dependencies()` in install.sh (lines 288-296) with detailed warning for unsupported distros
+- Modified `install_restic_verified()` in install.sh (lines 556-558) to skip bzip2 install attempt on unsupported distros
+- Modified `install_rclone_verified()` in both install.sh (lines 440-452) and lib/core.sh (lines 884-896) to skip unzip install attempt on unsupported distros
+- Skip argon2 install attempt on unsupported distros (install.sh line 320)
+- Files changed:
+  - `install.sh` - Updated install_dependencies(), install_restic_verified(), install_rclone_verified()
+  - `lib/core.sh` - Updated install_rclone_verified()
+  - `prd.json` - Marked US-005 as passes: true
+- **Learnings for future iterations:**
+  - When `detect_package_manager()` returns "unknown", pkg_install will return 1 - check for this to provide helpful messages
+  - Use `if [[ "$pm" != "unknown" ]]` pattern to skip package install attempts on unsupported distros
+  - Return values from helper functions (like install_restic_verified) are handled gracefully by outer code - return 1 is OK
+  - For better UX, show "package not found - please install manually" instead of generic failure messages
+---

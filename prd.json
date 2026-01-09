@@ -60,7 +60,7 @@
       "title": "Unsupported Distribution Handling",
       "description": "As a user on an unsupported/niche distribution, I want clear instructions on what to install manually so that I can still use backupd.",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "acceptanceCriteria": [
         "Unsupported distro is detected (not silently assumed)",
         "Warning message lists required packages: bzip2, argon2 (optional), unzip",
