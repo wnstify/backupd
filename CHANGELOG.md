@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-Job Scheduling via CLI** — Independent backup schedules for each job without interactive menu
+  - `backupd job schedule <job_name> <type> <schedule>` — Set backup schedule via CLI
+  - Support for all 4 backup types: `db`, `files`, `verify`, `verify-full`
+  - `--show` flag displays current schedule(s) for a job
+  - `--disable` flag stops timer but preserves config for re-enabling
+  - `--json` flag for automation and API integration
+  - `--all` flag shows cross-job schedule overview
+  - Schedules persisted to `/etc/backupd/jobs/{jobname}/job.conf` as `SCHEDULE_{TYPE}`
+
+- **Schedule Validation & Conflict Detection**
+  - `validate_schedule_format()` — Validates OnCalendar expressions before timer creation
+  - `check_schedule_conflicts()` — Warns about overlapping schedules across jobs
+  - `list_all_job_schedules()` — Cross-job schedule overview
+
+- **Interactive Schedule Menu**
+  - New `schedule_interactive_menu()` for non-CLI users
+  - Guided schedule selection with preset options
+  - Accessible via `backupd job configure <name>`
+
 - **FlashPanel Support** — Full auto-detection support for FlashPanel hosting control panel
   - Non-isolated mode: `/home/flashpanel/{site}` — all sites under single flashpanel user
   - Isolated mode: `/home/{user}/{site}` — each site has its own system user
@@ -41,15 +60,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prompts user to confirm or switch modes
   - Clear messaging: "FlashPanel detected (non-isolated mode)" or "(isolated mode)"
 
+- **Job Management** — Enhanced schedule visibility
+  - `backupd job show <name>` now includes "Schedules:" section
+  - Timer status (active/inactive) displayed for each schedule type
+
+### Fixed
+
+- **enable_job() Timer Recreation** — Re-enabling a disabled job now recreates timers from stored configuration
+  - Reads SCHEDULE_DB, SCHEDULE_FILES, SCHEDULE_VERIFY, SCHEDULE_VERIFY_FULL from config
+  - Automatically calls `create_job_timer()` for each non-empty schedule
+
 ### Technical
 
-- **Modified Files:**
+- **Multi-Schedule Implementation (Phase A+B+C):**
+  - `lib/cli.sh` — Added `cli_job_schedule()` function (~175 lines)
+  - `lib/cli.sh` — Updated `cli_job_show()` with schedules section
+  - `lib/cli.sh` — Updated `cli_job_help()` with schedule command documentation
+  - `lib/jobs.sh` — Added `validate_schedule_format()` function
+  - `lib/jobs.sh` — Added `check_schedule_conflicts()` function
+  - `lib/jobs.sh` — Added `list_all_job_schedules()` function
+  - `lib/jobs.sh` — Fixed `enable_job()` to recreate timers from config
+  - `lib/schedule.sh` — Added `schedule_interactive_menu()` function
+
+- **FlashPanel Implementation:**
   - `lib/core.sh` — Added `flashpanel` and `flashpanel-isolated` to PANEL_DEFINITIONS array
-  - `lib/core.sh` — Added `detect_flashpanel_isolation_mode()` function (lines 702-712)
-  - `lib/core.sh` — Added FlashPanel detection block in `detect_panel_by_service()` (lines 647-651)
+  - `lib/core.sh` — Added `detect_flashpanel_isolation_mode()` function
+  - `lib/core.sh` — Added FlashPanel detection block in `detect_panel_by_service()`
   - `lib/setup.sh` — Added FlashPanel menu options and mode override prompt
   - `USAGE.md` — Added Supported Panels section with FlashPanel documentation
   - `README.md` — Added FlashPanel to multi-panel support list
+
+- **CLI Exit Codes for Schedule Command:**
+  - 0: Success
+  - 2: Usage error (missing arguments)
+  - 3: Job not found
+  - 4: Invalid backup type
+  - 5: Timer creation failed
 
 - **Panel Definitions Added:**
   | Panel Key | Display Name | Path Pattern | Webroot | Detection |
@@ -57,10 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `flashpanel` | FlashPanel | `/home/flashpanel/*` | `.` | Service |
   | `flashpanel-isolated` | FlashPanel (Isolated) | `/home/*/*` | `.` | Service |
 
-- **Detection Logic:**
-  - Primary: `is_service_running "flashpanel"` checks for flashpanel.service
-  - Fallback: `[[ -f "/root/.flashpanel/agent/flashpanel" ]]` checks for agent binary
-  - Isolation mode: `detect_flashpanel_isolation_mode()` returns appropriate panel key
+- **Commits:** BACKUPD-008 through BACKUPD-032 (25 total)
 
 ---
 
@@ -1374,7 +1417,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 3.2.0 | 2026-01-09 | **FlashPanel support** with auto-detection, isolation modes, mode override |
+| 3.2.0 | 2026-01-09 | **Per-job scheduling CLI**, schedule validation, FlashPanel auto-detection |
 | 3.1.4 | 2026-01-09 | Multi-distribution package manager support (6 distros), wget fallback |
 | 3.1.3 | 2026-01-09 | 19 bug fixes across logging, crypto, core, CLI modules |
 | 3.1.2 | 2026-01-08 | Security & reliability fixes for updater (18 bugs) |
