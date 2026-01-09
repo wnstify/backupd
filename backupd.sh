@@ -359,7 +359,7 @@ show_encryption_status() {
   echo
 
   if ! argon2_available; then
-    print_info "Argon2 not installed. Install with: sudo apt install argon2"
+    print_info "Argon2 not installed. Install with: $(get_install_hint argon2)"
   fi
 }
 
@@ -392,7 +392,7 @@ do_migrate_encryption() {
   if [[ "$best_version" == "$CRYPTO_VERSION_ARGON2ID" ]] && ! argon2_available; then
     print_error "Argon2 not installed"
     echo
-    echo "Install with: sudo apt install argon2"
+    echo "Install with: $(get_install_hint argon2)"
     echo "Then run this command again."
     return 1
   fi

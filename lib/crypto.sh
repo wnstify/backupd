@@ -374,7 +374,7 @@ migrate_secrets() {
 
   # Check if target version is available
   if [[ "$to_version" == "$CRYPTO_VERSION_ARGON2ID" ]] && ! argon2_available; then
-    print_error "Argon2 is not installed. Install with: sudo apt install argon2"
+    print_error "Argon2 is not installed. Install with: $(get_install_hint argon2)"
     return 1
   fi
 
