@@ -514,6 +514,39 @@ check_schedule_conflicts() {
   return 0
 }
 
+# List all schedules across all jobs
+# Usage: list_all_job_schedules
+# Output format: job_name|backup_type|schedule|timer_status (one per line)
+# timer_status: active, inactive, or unknown
+list_all_job_schedules() {
+  local job_name backup_type schedule timer_name timer_status
+  local types=("db" "files" "verify" "verify-full")
+  local config_keys=("SCHEDULE_DB" "SCHEDULE_FILES" "SCHEDULE_VERIFY" "SCHEDULE_VERIFY_FULL")
+
+  while IFS= read -r job_name; do
+    for i in "${!types[@]}"; do
+      backup_type="${types[$i]}"
+      schedule=$(get_job_config "$job_name" "${config_keys[$i]}")
+
+      # Only output if schedule is configured
+      if [[ -n "$schedule" ]]; then
+        timer_name="$(get_timer_name "$job_name" "$backup_type").timer"
+
+        # Get timer status
+        if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
+          timer_status="active"
+        elif systemctl list-unit-files "$timer_name" 2>/dev/null | grep -q "$timer_name"; then
+          timer_status="inactive"
+        else
+          timer_status="unknown"
+        fi
+
+        echo "${job_name}|${backup_type}|${schedule}|${timer_status}"
+      fi
+    done
+  done < <(list_jobs)
+}
+
 # Create systemd timer for a job
 # Usage: create_job_timer "production" "db" "*-*-* 02:00:00"
 create_job_timer() {
