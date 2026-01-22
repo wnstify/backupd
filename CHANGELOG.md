@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.2] - 2026-01-22
+
+### Fixed
+
+- **CLI Trap Scope Bug (BACKUPD-037)**
+  - Fixed `temp_output: unbound variable` error on script exit/interrupt
+  - Changed trap in `run_backup_script()` from `RETURN EXIT INT TERM` to `RETURN` only
+  - Function-local variables are out of scope when EXIT/INT/TERM traps fire at script exit
+  - **File:** `lib/cli.sh:20`
+
+- **Exit Code Masking (BACKUPD-037)**
+  - Fixed CLI commands returning exit code 1 even on success
+  - The `exit $?` pattern can be affected by trap timing
+  - Now captures exit code explicitly into variable before exit statement
+  - **File:** `backupd.sh:548-550`
+
+- **Restore Script Path Mismatch (BACKUPD-037)**
+  - Fixed `restore db` and `restore files` commands failing with "script not found"
+  - CLI expected `db_restore.sh` and `files_restore.sh` but generator creates unified `restore.sh`
+  - Updated CLI to use `restore.sh` with `RESTORE_TYPE` environment variable
+  - Added non-interactive mode to restore script: checks `RESTORE_TYPE` at start of `main_menu()`
+  - **Files:** `lib/cli.sh:345-378`, `lib/generators.sh:1346-1359`
+
+- **List Backups Using Legacy v2 Patterns (BACKUPD-037)**
+  - Fixed `restore --list` showing rclone folder names instead of restic snapshots
+  - `cli_list_backups()` was using legacy v2 patterns (`rclone lsf` with `*.tar.gz.gpg`)
+  - Backupd v3 uses restic repositories with tagged snapshots
+  - Now queries `restic snapshots --tag <filter>` (database or files)
+  - **File:** `lib/cli.sh:388-435`
+
+- **Status Command Exit Code with Empty Logs (BACKUPD-037)**
+  - Fixed `status` command returning exit code 1 when log files have no matching entries
+  - With `set -o pipefail`, grep returning no matches (exit 1) propagates through pipe
+  - Added `|| true` to grep pipelines in `cli_status_text()` to suppress exit on no match
+  - **File:** `lib/cli.sh:576,583`
+
+### Added
+
+- **Cron Fallback Scheduler (BACKUPD-038)** — Automatic scheduling on non-systemd systems
+  - Auto-detects scheduler availability: systemd → cron → manual instructions
+  - New `lib/scheduler.sh` module with unified API
+  - `detect_scheduler()` — Returns "systemd", "cron", or "none"
+  - `oncalendar_to_cron()` — Converts OnCalendar expressions to cron format
+  - `create_cron_entry()` / `remove_cron_entry()` — Manages `/etc/cron.d/backupd`
+  - `scheduler_disable()` — Unified cleanup for both systemd and cron
+  - Supported OnCalendar patterns: hourly, daily, weekly, monthly, `*-*-* HH:MM:SS`, `DOW *-*-* HH:MM`
+  - Cron entries include `nice -n 10 ionice -c3` for parity with systemd Nice/IOSchedulingClass
+  - Scripts detect `BACKUPD_CRON=1` and add 0-5 minute random delay (simulates RandomizedDelaySec)
+  - Status display shows scheduler type: "(systemd)", "(cron)", or "(cron-legacy)"
+  - Full multi-job support via `create_job_timer()` fallback
+  - **Target systems:** Alpine Linux (busybox), RHEL/CentOS 6, Docker containers
+  - **Files:** `lib/scheduler.sh` (new), `lib/schedule.sh`, `lib/jobs.sh`, `lib/generators.sh`, `lib/cli.sh`, `lib/status.sh`, `backupd.sh`, `install.sh`, `lib/updater.sh`
+
+---
+
 ## [3.2.1] - 2026-01-09
 
 ### Added
@@ -1490,6 +1545,7 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.2.2 | 2026-01-22 | **Cron fallback scheduler** (Alpine/Docker/RHEL6), 5 bug fixes |
 | 3.2.1 | 2026-01-09 | **Schedule auto-suggest**, bulk operations, 12 schedule templates |
 | 3.2.0 | 2026-01-09 | **Per-job scheduling CLI**, schedule validation, FlashPanel auto-detection |
 | 3.1.4 | 2026-01-09 | Multi-distribution package manager support (6 distros), wget fallback |

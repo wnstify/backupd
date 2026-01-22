@@ -1,6 +1,6 @@
 # Usage Guide
 
-Complete usage documentation for **Backupd v3.2.1** by Backupd.
+Complete usage documentation for **Backupd v3.2.2** by Backupd.
 
 > **Note:** v3.1.0 adds multi-job support for managing multiple backup configurations.
 > v3.0.0 introduced restic as the backup engine, replacing GPG+tar+pigz.
@@ -44,7 +44,7 @@ Before running Backupd, ensure you have the following:
 | **OS** | Ubuntu 20.04+, Debian 10+ (or compatible) |
 | **Access** | Root or sudo |
 | **MySQL/MariaDB** | For database backups |
-| **systemd** | For scheduled backups |
+| **systemd or cron** | For scheduled backups (cron fallback available) |
 
 ### Auto-installed by the installer
 
@@ -89,7 +89,7 @@ On first run, you'll see the disclaimer and welcome screen:
 
 ```
 ========================================================
-              Backupd v3.1.2
+              Backupd v3.2.2
                     by Backupd
 ========================================================
 
@@ -121,7 +121,7 @@ After configuration, you'll see the main menu:
 
 ```
 ========================================================
-              Backupd v3.1.2
+              Backupd v3.2.2
                     by Backupd
 ========================================================
 

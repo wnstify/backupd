@@ -65,7 +65,7 @@ This tool provides exactly that.
 - 🐧 **Multi-Distribution Support** — Works on Debian, Ubuntu, Fedora, RHEL, CentOS, Arch, Alpine, openSUSE and derivatives
 - 🔐 **Machine-Bound Encryption** — Credentials encrypted with AES-256, tied to your server
 - ☁️ **Cloud Storage** — Supports 40+ providers via rclone (S3, B2, Wasabi, Google Drive, etc.)
-- ⏰ **Automated Scheduling** — Systemd timers with automatic retry and catch-up
+- ⏰ **Automated Scheduling** — Systemd timers or cron fallback for non-systemd systems
 - 🧹 **Retention & Cleanup** — Configurable retention policy with automatic old backup deletion
 - ✅ **Integrity Verification** — SHA256 checksums, quick checks (no download), and monthly full test reminders
 - 🔔 **Triple-Channel Notifications** — Optional alerts via ntfy.sh, Pushover, AND/OR custom webhooks on backup events
@@ -104,7 +104,7 @@ curl -fsSL https://raw.githubusercontent.com/wnstify/backupd/develop/install.sh 
 | **OS** | Ubuntu, Debian, Fedora, RHEL, CentOS, Arch, Alpine, openSUSE (and derivatives) |
 | **Access** | Root or sudo |
 | **MySQL/MariaDB** | For database backups |
-| **systemd** | For scheduled backups (optional, manual backups work without) |
+| **systemd or cron** | For scheduled backups (cron fallback for Alpine/Docker/RHEL6) |
 | **curl or wget** | At least one required for downloads |
 | **restic** | Auto-installed (backup engine with encryption + deduplication) |
 | **rclone** | Auto-installed (cloud storage transport) |
@@ -188,7 +188,7 @@ sudo backupd
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
-║                      Backupd v3.1.0                       ║
+║                      Backupd v3.2.2                       ║
 ║                         by Backupd                        ║
 ╚═══════════════════════════════════════════════════════════╝
 
