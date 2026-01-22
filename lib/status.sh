@@ -54,9 +54,9 @@ show_status() {
     local db_schedule
     db_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-db.timer 2>/dev/null | cut -d'=' -f2)
     print_success "Database backup (systemd): $db_schedule"
-  elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/db_backup.sh"; then
+  elif cron_entry_exists "db" "default" 2>/dev/null; then
     local db_schedule
-    db_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/db_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
+    db_schedule=$(grep "# backupd-db$" /etc/cron.d/backupd 2>/dev/null | awk '{print $1,$2,$3,$4,$5}')
     print_success "Database backup (cron): $db_schedule"
   else
     print_warning "Database backup: NOT SCHEDULED"
@@ -67,9 +67,9 @@ show_status() {
     local files_schedule
     files_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-files.timer 2>/dev/null | cut -d'=' -f2)
     print_success "Files backup (systemd): $files_schedule"
-  elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/files_backup.sh"; then
+  elif cron_entry_exists "files" "default" 2>/dev/null; then
     local files_schedule
-    files_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/files_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
+    files_schedule=$(grep "# backupd-files$" /etc/cron.d/backupd 2>/dev/null | awk '{print $1,$2,$3,$4,$5}')
     print_success "Files backup (cron): $files_schedule"
   else
     print_warning "Files backup: NOT SCHEDULED"
@@ -80,6 +80,10 @@ show_status() {
     local verify_schedule
     verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify.timer 2>/dev/null | cut -d'=' -f2)
     print_success "Integrity check (systemd): $verify_schedule"
+  elif cron_entry_exists "verify" "default" 2>/dev/null; then
+    local verify_schedule
+    verify_schedule=$(grep "# backupd-verify$" /etc/cron.d/backupd 2>/dev/null | awk '{print $1,$2,$3,$4,$5}')
+    print_success "Integrity check (cron): $verify_schedule"
   else
     echo -e "  ${YELLOW}Integrity check: NOT SCHEDULED (optional)${NC}"
   fi

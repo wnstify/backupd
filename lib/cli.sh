@@ -535,7 +535,11 @@ cli_status_text() {
   if systemctl is-enabled backupd-db.timer &>/dev/null; then
     local db_schedule
     db_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-db.timer 2>/dev/null | cut -d'=' -f2)
-    print_success "  Database: $db_schedule"
+    print_success "  Database: $db_schedule (systemd)"
+  elif cron_entry_exists "db" "default" 2>/dev/null; then
+    local db_schedule
+    db_schedule=$(grep "# backupd-db$" /etc/cron.d/backupd 2>/dev/null | awk '{print $1,$2,$3,$4,$5}')
+    print_success "  Database: $db_schedule (cron)"
   else
     print_warning "  Database: NOT SCHEDULED"
   fi
@@ -543,7 +547,11 @@ cli_status_text() {
   if systemctl is-enabled backupd-files.timer &>/dev/null; then
     local files_schedule
     files_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-files.timer 2>/dev/null | cut -d'=' -f2)
-    print_success "  Files: $files_schedule"
+    print_success "  Files: $files_schedule (systemd)"
+  elif cron_entry_exists "files" "default" 2>/dev/null; then
+    local files_schedule
+    files_schedule=$(grep "# backupd-files$" /etc/cron.d/backupd 2>/dev/null | awk '{print $1,$2,$3,$4,$5}')
+    print_success "  Files: $files_schedule (cron)"
   else
     print_warning "  Files: NOT SCHEDULED"
   fi
@@ -1446,16 +1454,34 @@ cli_schedule_enable() {
 
   local timer_name="backupd-${timer_type}.timer"
 
-  if [[ ! -f "/etc/systemd/system/$timer_name" ]]; then
-    print_error "Timer not configured. Use interactive mode to set schedule first."
-    echo "Run 'backupd' and go to 'Manage schedules'."
+  # Check scheduler availability and existing configuration
+  if is_systemd_available; then
+    if [[ ! -f "/etc/systemd/system/$timer_name" ]]; then
+      print_error "Timer not configured. Use interactive mode to set schedule first."
+      echo "Run 'backupd' and go to 'Manage schedules'."
+      return $EXIT_NOT_CONFIGURED
+    fi
+
+    systemctl enable "$timer_name" 2>/dev/null || true
+    systemctl start "$timer_name" 2>/dev/null || true
+
+    print_success "Enabled $timer_name (systemd)"
+
+  elif is_cron_available; then
+    # Check if cron entry exists
+    if ! cron_entry_exists "$timer_type" "default"; then
+      print_error "Schedule not configured. Use interactive mode to set schedule first."
+      echo "Run 'backupd' and go to 'Manage schedules'."
+      return $EXIT_NOT_CONFIGURED
+    fi
+
+    # Cron entries are always active once created, nothing to "enable"
+    print_success "Schedule is active (cron)"
+
+  else
+    print_error "No scheduler available (systemd or cron required)"
     return $EXIT_NOT_CONFIGURED
   fi
-
-  systemctl enable "$timer_name" 2>/dev/null || true
-  systemctl start "$timer_name" 2>/dev/null || true
-
-  print_success "Enabled $timer_name"
 }
 
 cli_schedule_disable() {
@@ -1498,25 +1524,27 @@ cli_schedule_disable() {
 
   local timer_name="backupd-${timer_type}.timer"
 
-  systemctl stop "$timer_name" 2>/dev/null || true
-  systemctl disable "$timer_name" 2>/dev/null || true
-
-  # Also remove cron entries for db/files
-  if [[ "$timer_type" == "db" ]]; then
-    ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/db_backup.sh" ) | crontab - 2>/dev/null || true
-  elif [[ "$timer_type" == "files" ]]; then
-    ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/files_backup.sh" ) | crontab - 2>/dev/null || true
+  # Disable via both schedulers (cleanup)
+  if is_systemd_available; then
+    systemctl stop "$timer_name" 2>/dev/null || true
+    systemctl disable "$timer_name" 2>/dev/null || true
   fi
 
-  print_success "Disabled $timer_name"
+  # Remove cron entries via scheduler abstraction
+  if is_cron_available; then
+    remove_cron_entry "$timer_type" "default"
+  fi
+
+  print_success "Disabled ${timer_type} schedule"
 }
 
 cli_schedule_help() {
   cat <<EOF
 Usage: backupd schedule [COMMAND] [TYPE]
 
-Manage systemd timer-based backup schedules. Schedules must first be configured
-via the interactive menu before they can be enabled/disabled here.
+Manage backup schedules. Uses systemd timers when available, falls back to cron.
+Schedules must first be configured via the interactive menu before they can be
+enabled/disabled here.
 
 Commands:
   list              Show current schedules (default)
