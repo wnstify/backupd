@@ -101,7 +101,7 @@ manage_schedules() {
     echo "Current Schedules:"
     echo
 
-    # Check systemd timers first, fall back to cron
+    # Check systemd timers first, fall back to cron (/etc/cron.d/backupd or legacy user crontab)
     if systemctl is-enabled backupd-db.timer &>/dev/null; then
       local db_schedule
       db_schedule=$(systemctl show backupd-db.timer --property=TimersCalendar 2>/dev/null | cut -d'=' -f2)
@@ -110,10 +110,14 @@ manage_schedules() {
       fi
       [[ -z "$db_schedule" ]] && db_schedule="(unknown)"
       print_success "Database (systemd): $db_schedule"
+    elif cron_entry_exists "db" "default"; then
+      local db_schedule
+      db_schedule=$(get_cron_schedule "db" "default")
+      print_success "Database (cron): $db_schedule"
     elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/db_backup.sh"; then
       local db_schedule
       db_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/db_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
-      print_success "Database (cron): $db_schedule"
+      print_success "Database (cron-legacy): $db_schedule"
     else
       print_warning "Database: NOT SCHEDULED"
     fi
@@ -126,10 +130,14 @@ manage_schedules() {
       fi
       [[ -z "$files_schedule" ]] && files_schedule="(unknown)"
       print_success "Files (systemd): $files_schedule"
+    elif cron_entry_exists "files" "default"; then
+      local files_schedule
+      files_schedule=$(get_cron_schedule "files" "default")
+      print_success "Files (cron): $files_schedule"
     elif crontab -l 2>/dev/null | grep -q "$SCRIPTS_DIR/files_backup.sh"; then
       local files_schedule
       files_schedule=$(crontab -l 2>/dev/null | grep "$SCRIPTS_DIR/files_backup.sh" | awk '{print $1,$2,$3,$4,$5}')
-      print_success "Files (cron): $files_schedule"
+      print_success "Files (cron-legacy): $files_schedule"
     else
       print_warning "Files: NOT SCHEDULED"
     fi
@@ -139,6 +147,10 @@ manage_schedules() {
       local verify_schedule
       verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify.timer 2>/dev/null | cut -d'=' -f2)
       print_success "Quick integrity check (systemd): $verify_schedule"
+    elif cron_entry_exists "verify" "default"; then
+      local verify_schedule
+      verify_schedule=$(get_cron_schedule "verify" "default")
+      print_success "Quick integrity check (cron): $verify_schedule"
     else
       print_warning "Quick integrity check: NOT SCHEDULED (optional)"
     fi
@@ -148,6 +160,10 @@ manage_schedules() {
       local full_verify_schedule
       full_verify_schedule=$(grep -E "^OnCalendar=" /etc/systemd/system/backupd-verify-full.timer 2>/dev/null | cut -d'=' -f2)
       print_success "Monthly full verification (systemd): $full_verify_schedule"
+    elif cron_entry_exists "verify-full" "default"; then
+      local full_verify_schedule
+      full_verify_schedule=$(get_cron_schedule "verify-full" "default")
+      print_success "Monthly full verification (cron): $full_verify_schedule"
     else
       print_warning "Monthly full verification: DISABLED (recommended to enable)"
     fi
@@ -339,8 +355,10 @@ set_systemd_schedule() {
       ;;
   esac
 
-  # Update the timer file
-  cat > "/etc/systemd/system/$timer_name" << EOF
+  # Choose scheduler based on availability
+  if is_systemd_available; then
+    # Systemd scheduler: create timer and service units
+    cat > "/etc/systemd/system/$timer_name" << EOF
 [Unit]
 Description=Backupd - $display_name Backup Timer
 Requires=$service_name
@@ -356,9 +374,9 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-  # Always regenerate service file to ensure correct paths
-  local script_path="$SCRIPTS_DIR/${timer_type}_backup.sh"
-  cat > "/etc/systemd/system/$service_name" << EOF
+    # Always regenerate service file to ensure correct paths
+    local script_path="$SCRIPTS_DIR/${timer_type}_backup.sh"
+    cat > "/etc/systemd/system/$service_name" << EOF
 [Unit]
 Description=Backupd - $display_name Backup
 After=network-online.target
@@ -376,40 +394,53 @@ IOSchedulingClass=idle
 WantedBy=multi-user.target
 EOF
 
-  # Reload and enable
-  systemctl daemon-reload
-  systemctl enable "$timer_name" 2>/dev/null || true
-  systemctl start "$timer_name" 2>/dev/null || true
+    # Reload and enable
+    systemctl daemon-reload
+    systemctl enable "$timer_name" 2>/dev/null || true
+    systemctl start "$timer_name" 2>/dev/null || true
 
-  # Remove any cron entries for this backup (use regex for precise matching)
-  if [[ "$timer_type" == "db" ]]; then
-    ( crontab -l 2>/dev/null | grep -v "^[^#].*$SCRIPTS_DIR/db_backup.sh\\( \\|$\\)" ) | crontab - 2>/dev/null || true
+    # Remove any cron entries for this backup (cleanup)
+    remove_cron_entry "$timer_type" "default"
+
+    echo
+    print_success "$display_name backup schedule set: $on_calendar"
+    print_info "Timer enabled and started (systemd)"
+
+  elif is_cron_available; then
+    # Cron fallback: validate cron compatibility first
+    if ! is_cron_compatible "$on_calendar"; then
+      echo
+      print_error "This schedule pattern requires systemd."
+      print_info "Please use a simpler pattern (e.g., daily, hourly, *-*-* HH:MM:SS)"
+      press_enter_to_continue
+      return 1
+    fi
+
+    # Create cron entry
+    if ! create_cron_entry "$timer_type" "$on_calendar" "default"; then
+      print_error "Failed to create cron schedule"
+      press_enter_to_continue
+      return 1
+    fi
+
+    echo
+    print_success "$display_name backup schedule set: $on_calendar"
+    print_info "Schedule created (cron)"
+
   else
-    ( crontab -l 2>/dev/null | grep -v "^[^#].*$SCRIPTS_DIR/files_backup.sh\\( \\|$\\)" ) | crontab - 2>/dev/null || true
+    # No scheduler available: provide manual instructions
+    print_manual_cron_entry "$timer_type" "$on_calendar" "default"
   fi
 
-  echo
-  print_success "$display_name backup schedule set: $on_calendar"
-  print_info "Timer enabled and started"
   press_enter_to_continue
 }
 
 disable_schedule() {
   local timer_type="$1"
   local display_name="$2"
-  local timer_name="backupd-${timer_type}.timer"
 
-  # Disable systemd timer
-  systemctl stop "$timer_name" 2>/dev/null || true
-  systemctl disable "$timer_name" 2>/dev/null || true
-
-  # Also remove cron entries (for db/files only, not verify)
-  if [[ "$timer_type" == "db" ]]; then
-    ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/db_backup.sh" ) | crontab - 2>/dev/null || true
-  elif [[ "$timer_type" == "files" ]]; then
-    ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/files_backup.sh" ) | crontab - 2>/dev/null || true
-  fi
-  # verify type has no cron fallback, just systemd
+  # Use unified scheduler API to disable both systemd and cron
+  scheduler_disable "$timer_type" "default"
 
   print_success "$display_name schedule disabled."
   press_enter_to_continue
