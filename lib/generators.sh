@@ -73,6 +73,11 @@ generate_restic_db_backup_script() {
 set -euo pipefail
 umask 077
 
+# Cron compatibility: random delay (simulates systemd RandomizedDelaySec)
+if [[ "${BACKUPD_CRON:-}" == "1" ]]; then
+  sleep $((RANDOM % 300))
+fi
+
 # ============================================================================
 # Backupd v3.0 - Restic Database Backup Script
 # Uses restic for encrypted, deduplicated backups via rclone backend
@@ -474,6 +479,11 @@ generate_restic_files_backup_script() {
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+
+# Cron compatibility: random delay (simulates systemd RandomizedDelaySec)
+if [[ "${BACKUPD_CRON:-}" == "1" ]]; then
+  sleep $((RANDOM % 300))
+fi
 
 # ============================================================================
 # Backupd v3.0 - Restic Files Backup Script
@@ -1438,6 +1448,11 @@ generate_restic_verify_script() {
 set -euo pipefail
 umask 077
 
+# Cron compatibility: random delay (simulates systemd RandomizedDelaySec)
+if [[ "${BACKUPD_CRON:-}" == "1" ]]; then
+  sleep $((RANDOM % 300))
+fi
+
 # ============================================================================
 # Backupd v3.0 - Restic Quick Verification Script
 # Verifies repository integrity using restic check (metadata only)
@@ -1655,6 +1670,11 @@ VERIFYEOF
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+
+# Cron compatibility: random delay (simulates systemd RandomizedDelaySec)
+if [[ "${BACKUPD_CRON:-}" == "1" ]]; then
+  sleep $((RANDOM % 300))
+fi
 
 # ============================================================================
 # Backupd v3.0 - Restic Full Verification Script
