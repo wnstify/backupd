@@ -546,7 +546,8 @@ parse_arguments() {
       log_init "$@"
       trap 'log_end' EXIT
       cli_dispatch "$@"
-      exit $?
+      _cli_exit_code=$?
+      exit $_cli_exit_code
       ;;
   esac
 
