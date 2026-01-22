@@ -342,17 +342,18 @@ cli_restore() {
         cli_list_backups "db"
         return $?
       fi
-      if [[ -f "$SCRIPTS_DIR/db_restore.sh" ]]; then
+      if [[ -f "$SCRIPTS_DIR/restore.sh" ]]; then
         if is_dry_run; then
-          dry_run_msg "bash $SCRIPTS_DIR/db_restore.sh"
+          dry_run_msg "bash $SCRIPTS_DIR/restore.sh (database restore)"
           return 0
         fi
         [[ -n "$job_id" ]] && export JOB_ID="$job_id"
         [[ -n "$backup_id" ]] && export BACKUP_ID="$backup_id"
-        bash "$SCRIPTS_DIR/db_restore.sh"
+        export RESTORE_TYPE="database"
+        bash "$SCRIPTS_DIR/restore.sh"
         return $?
       else
-        print_error "Database restore script not found. Run setup first."
+        print_error "Restore script not found. Run setup first."
         return $EXIT_NOINPUT
       fi
       ;;
@@ -361,17 +362,18 @@ cli_restore() {
         cli_list_backups "files"
         return $?
       fi
-      if [[ -f "$SCRIPTS_DIR/files_restore.sh" ]]; then
+      if [[ -f "$SCRIPTS_DIR/restore.sh" ]]; then
         if is_dry_run; then
-          dry_run_msg "bash $SCRIPTS_DIR/files_restore.sh"
+          dry_run_msg "bash $SCRIPTS_DIR/restore.sh (files restore)"
           return 0
         fi
         [[ -n "$job_id" ]] && export JOB_ID="$job_id"
         [[ -n "$backup_id" ]] && export BACKUP_ID="$backup_id"
-        bash "$SCRIPTS_DIR/files_restore.sh"
+        export RESTORE_TYPE="files"
+        bash "$SCRIPTS_DIR/restore.sh"
         return $?
       else
-        print_error "Files restore script not found. Run setup first."
+        print_error "Restore script not found. Run setup first."
         return $EXIT_NOINPUT
       fi
       ;;

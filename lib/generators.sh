@@ -1344,6 +1344,20 @@ restore_files_menu() {
 # ---------- Main Menu ----------
 
 main_menu() {
+  # Non-interactive mode: if RESTORE_TYPE is set, go directly to that restore
+  if [[ -n "\${RESTORE_TYPE:-}" ]]; then
+    case "\$RESTORE_TYPE" in
+      database|db)
+        restore_database_menu
+        return \$?
+        ;;
+      files)
+        restore_files_menu
+        return \$?
+        ;;
+    esac
+  fi
+
   while true; do
     print_header
 
