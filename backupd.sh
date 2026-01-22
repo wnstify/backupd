@@ -60,6 +60,7 @@ source "$LIB_DIR/backup.sh"     # Backup execution, cleanup
 source "$LIB_DIR/verify.sh"     # Backup integrity verification
 source "$LIB_DIR/restore.sh"    # Restore execution
 source "$LIB_DIR/schedule.sh"   # Schedule management
+source "$LIB_DIR/scheduler.sh"  # Scheduler abstraction (cron fallback)
 source "$LIB_DIR/setup.sh"      # Setup wizard
 source "$LIB_DIR/updater.sh"    # Auto-update functionality
 source "$LIB_DIR/notifications.sh" # Notification configuration
@@ -160,8 +161,10 @@ uninstall_tool() {
   rm -f /etc/systemd/system/backupd-verify.timer
   systemctl daemon-reload 2>/dev/null || true
 
-  # Step 5: Remove cron jobs (legacy)
-  ( crontab -l 2>/dev/null | grep -Fv "$SCRIPTS_DIR/db_backup.sh" | grep -Fv "$SCRIPTS_DIR/files_backup.sh" ) | crontab - 2>/dev/null || true
+  # Step 5: Remove cron jobs
+  rm -f /etc/cron.d/backupd
+  # Also clean legacy user crontab entries
+  ( crontab -l 2>/dev/null | grep -Fv "backupd" | grep -Fv "$SCRIPTS_DIR/db_backup.sh" | grep -Fv "$SCRIPTS_DIR/files_backup.sh" ) | crontab - 2>/dev/null || true
 
   # Step 6: Remove secrets
   echo "Removing secrets..."
