@@ -41,6 +41,7 @@ LIB_MODULES=(
     "verify.sh"
     "restore.sh"
     "schedule.sh"
+    "scheduler.sh"
     "setup.sh"
     "updater.sh"
     "notifications.sh"

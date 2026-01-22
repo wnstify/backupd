@@ -799,6 +799,7 @@ do_dev_update() {
     "lib/verify.sh"
     "lib/restore.sh"
     "lib/schedule.sh"
+    "lib/scheduler.sh"    # Added: cron fallback scheduler (v3.2.2)
     "lib/setup.sh"
     "lib/updater.sh"
     "lib/notifications.sh"
