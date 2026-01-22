@@ -387,16 +387,16 @@ cli_restore() {
 
 cli_list_backups() {
   local backup_type="$1"
-  local rclone_remote rclone_path pattern
+  local rclone_remote rclone_path tag_filter repo
 
   rclone_remote="$(get_config_value 'RCLONE_REMOTE')"
 
   if [[ "$backup_type" == "db" ]]; then
     rclone_path="$(get_config_value 'RCLONE_DB_PATH')"
-    pattern="*-db_backups-*.tar.gz.gpg"
+    tag_filter="database"
   else
     rclone_path="$(get_config_value 'RCLONE_FILES_PATH')"
-    pattern="*.tar.gz"
+    tag_filter="files"
   fi
 
   if [[ -z "$rclone_path" ]]; then
@@ -404,28 +404,33 @@ cli_list_backups() {
     return $EXIT_NOT_CONFIGURED
   fi
 
+  # Build restic repository URL
+  repo="rclone:${rclone_remote}:${rclone_path}"
+
+  # Get restic password from secrets
+  local secrets_dir restic_password
+  secrets_dir="$(get_secrets_dir)"
+  restic_password="$(get_secret "$secrets_dir" ".c1" 2>/dev/null || echo "")"
+
+  if [[ -z "$restic_password" ]]; then
+    print_error "Repository password not found. Run setup first."
+    return $EXIT_NOT_CONFIGURED
+  fi
+
   if is_json_output; then
+    local snapshots_json
+    snapshots_json="$(RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag "$tag_filter" --json 2>/dev/null || echo "[]")"
+
     echo "{"
     echo "  \"type\": \"$backup_type\","
-    echo "  \"remote\": \"$rclone_remote:$rclone_path\","
-    echo "  \"backups\": ["
-    local first=1
-    while IFS= read -r file; do
-      [[ -z "$file" ]] && continue
-      [[ "$file" == *.sha256 ]] && continue
-      [[ $first -eq 0 ]] && echo ","
-      echo -n "    \"$file\""
-      first=0
-    done < <(rclone lsf "$rclone_remote:$rclone_path" --include "$pattern" 2>/dev/null | sort -r)
-    echo
-    echo "  ]"
+    echo "  \"remote\": \"$repo\","
+    echo "  \"snapshots\": $snapshots_json"
     echo "}"
   else
-    echo "Available ${backup_type} backups at $rclone_remote:$rclone_path"
+    echo "Available ${backup_type} snapshots at $repo"
     echo
-    rclone lsf "$rclone_remote:$rclone_path" --include "$pattern" 2>/dev/null | grep -v '\.sha256$' | sort -r | head -20
+    RESTIC_PASSWORD="$restic_password" restic -r "$repo" snapshots --tag "$tag_filter" 2>/dev/null || echo "No snapshots found or repository not initialized"
     echo
-    echo "(Showing most recent 20)"
   fi
 }
 
