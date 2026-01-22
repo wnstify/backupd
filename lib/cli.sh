@@ -17,7 +17,7 @@ run_backup_script() {
 
   # Create temp file for capturing output
   temp_output="$(mktemp)"
-  trap 'rm -f "$temp_output" 2>/dev/null' RETURN EXIT INT TERM
+  trap 'rm -f "$temp_output" 2>/dev/null' RETURN
 
   # Run script, capture output (disable pipefail temporarily to capture exit code)
   set +o pipefail
