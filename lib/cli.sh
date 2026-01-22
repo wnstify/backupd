@@ -573,14 +573,14 @@ cli_status_text() {
   [[ "${QUIET_MODE:-0}" -ne 1 ]] && echo "Recent Activity:"
   if [[ -f "$INSTALL_DIR/logs/db_logfile.log" ]]; then
     local last_db
-    last_db=$(grep "START per-db backup" "$INSTALL_DIR/logs/db_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}')
+    last_db=$(grep "START per-db backup" "$INSTALL_DIR/logs/db_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}' || true)
     [[ -n "$last_db" ]] && echo "  Last DB backup: $last_db" || echo "  Last DB backup: none"
   else
     echo "  Last DB backup: no log"
   fi
   if [[ -f "$INSTALL_DIR/logs/files_logfile.log" ]]; then
     local last_files
-    last_files=$(grep "START files backup" "$INSTALL_DIR/logs/files_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}')
+    last_files=$(grep "START files backup" "$INSTALL_DIR/logs/files_logfile.log" 2>/dev/null | tail -1 | awk '{print $2, $3}' || true)
     [[ -n "$last_files" ]] && echo "  Last Files backup: $last_files" || echo "  Last Files backup: none"
   else
     echo "  Last Files backup: no log"
