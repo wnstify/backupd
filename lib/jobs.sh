@@ -461,20 +461,29 @@ get_timer_name() {
 # Returns: 0 if valid, 1 if invalid
 validate_schedule_format() {
   local schedule="$1"
-  local error_output
 
   if [[ -z "$schedule" ]]; then
     echo "Error: Schedule expression is required" >&2
     return 1
   fi
 
-  # Use systemd-analyze to validate the OnCalendar expression
-  if ! error_output=$(systemd-analyze calendar "$schedule" --iterations=1 2>&1); then
-    echo "Error: Invalid schedule format: $error_output" >&2
-    return 1
+  # Try systemd-analyze first (most accurate)
+  if command -v systemd-analyze &>/dev/null; then
+    if systemd-analyze calendar "$schedule" --iterations=1 &>/dev/null; then
+      return 0
+    fi
   fi
 
-  return 0
+  # Fallback: check if convertible to cron format
+  local cron_schedule
+  if cron_schedule="$(oncalendar_to_cron "$schedule" 2>/dev/null)"; then
+    if validate_cron_format "$cron_schedule"; then
+      return 0
+    fi
+  fi
+
+  echo "Error: Invalid schedule format: $schedule" >&2
+  return 1
 }
 
 # Check for schedule conflicts across jobs
@@ -818,7 +827,7 @@ disable_all_job_schedules() {
   return 0
 }
 
-# Create systemd timer for a job
+# Create timer for a job (systemd or cron fallback)
 # Usage: create_job_timer "production" "db" "*-*-* 02:00:00"
 create_job_timer() {
   local job_name="$1"
@@ -837,11 +846,6 @@ create_job_timer() {
     return 1
   fi
 
-  local timer_base
-  timer_base="$(get_timer_name "$job_name" "$backup_type")"
-  local timer_name="${timer_base}.timer"
-  local service_name="${timer_base}.service"
-
   local scripts_dir
   scripts_dir="$(get_job_scripts_dir "$job_name")"
   local script_path="$scripts_dir/${backup_type}_backup.sh"
@@ -853,8 +857,16 @@ create_job_timer() {
     return 1
   fi
 
-  # Create service unit
-  cat > "/etc/systemd/system/$service_name" << EOF
+  # Choose scheduler based on availability
+  if is_systemd_available; then
+    # Systemd scheduler
+    local timer_base
+    timer_base="$(get_timer_name "$job_name" "$backup_type")"
+    local timer_name="${timer_base}.timer"
+    local service_name="${timer_base}.service"
+
+    # Create service unit
+    cat > "/etc/systemd/system/$service_name" << EOF
 [Unit]
 Description=Backupd - $job_name ${backup_type^} Backup
 After=network-online.target
@@ -873,8 +885,8 @@ IOSchedulingClass=idle
 WantedBy=multi-user.target
 EOF
 
-  # Create timer unit
-  cat > "/etc/systemd/system/$timer_name" << EOF
+    # Create timer unit
+    cat > "/etc/systemd/system/$timer_name" << EOF
 [Unit]
 Description=Backupd - $job_name ${backup_type^} Backup Timer
 Requires=$service_name
@@ -888,22 +900,52 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-  # Reload and enable
-  systemctl daemon-reload
-  systemctl enable "$timer_name" 2>/dev/null || true
-  systemctl start "$timer_name" 2>/dev/null || true
+    # Reload and enable
+    systemctl daemon-reload
+    systemctl enable "$timer_name" 2>/dev/null || true
+    systemctl start "$timer_name" 2>/dev/null || true
 
-  # Save schedule to job config
-  local schedule_key="SCHEDULE_${backup_type^^}"
-  save_job_config "$job_name" "$schedule_key" "$schedule"
+    # Remove any cron entries for this backup (cleanup)
+    remove_cron_entry "$backup_type" "$job_name"
 
-  print_success "Timer created: $timer_name"
-  print_info "Schedule: $schedule"
+    # Save schedule to job config
+    local schedule_key="SCHEDULE_${backup_type^^}"
+    save_job_config "$job_name" "$schedule_key" "$schedule"
+
+    print_success "Timer created: $timer_name (systemd)"
+    print_info "Schedule: $schedule"
+
+  elif is_cron_available; then
+    # Cron fallback: validate cron compatibility first
+    if ! is_cron_compatible "$schedule"; then
+      print_error "This schedule pattern requires systemd."
+      print_info "Please use a simpler pattern (e.g., daily, hourly, *-*-* HH:MM:SS)"
+      return 1
+    fi
+
+    # Create cron entry
+    if ! create_cron_entry "$backup_type" "$schedule" "$job_name"; then
+      print_error "Failed to create cron schedule"
+      return 1
+    fi
+
+    # Save schedule to job config
+    local schedule_key="SCHEDULE_${backup_type^^}"
+    save_job_config "$job_name" "$schedule_key" "$schedule"
+
+    print_success "Schedule created (cron)"
+    print_info "Schedule: $schedule"
+
+  else
+    # No scheduler available: provide manual instructions
+    print_manual_cron_entry "$backup_type" "$schedule" "$job_name"
+    return 1
+  fi
 
   return 0
 }
 
-# Disable all timers for a job
+# Disable all timers for a job (systemd and cron)
 # Usage: disable_job_timers "production"
 disable_job_timers() {
   local job_name="$1"
@@ -919,18 +961,25 @@ disable_job_timers() {
     local timer_name="${timer_base}.timer"
     local service_name="${timer_base}.service"
 
-    # Stop and disable timer
-    systemctl stop "$timer_name" 2>/dev/null || true
-    systemctl disable "$timer_name" 2>/dev/null || true
+    # Stop and disable systemd timer
+    if is_systemd_available; then
+      systemctl stop "$timer_name" 2>/dev/null || true
+      systemctl disable "$timer_name" 2>/dev/null || true
 
-    # Remove unit files (except for default job - those are managed globally)
-    if [[ "$job_name" != "$DEFAULT_JOB_NAME" ]]; then
-      rm -f "/etc/systemd/system/$timer_name" 2>/dev/null || true
-      rm -f "/etc/systemd/system/$service_name" 2>/dev/null || true
+      # Remove unit files (except for default job - those are managed globally)
+      if [[ "$job_name" != "$DEFAULT_JOB_NAME" ]]; then
+        rm -f "/etc/systemd/system/$timer_name" 2>/dev/null || true
+        rm -f "/etc/systemd/system/$service_name" 2>/dev/null || true
+      fi
     fi
+
+    # Remove cron entries
+    remove_cron_entry "$backup_type" "$job_name"
   done
 
-  systemctl daemon-reload 2>/dev/null || true
+  if is_systemd_available; then
+    systemctl daemon-reload 2>/dev/null || true
+  fi
 
   return 0
 }
