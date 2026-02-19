@@ -76,7 +76,7 @@ dev/
 sandbox/
 scratch/
 .audit/
-scripts/ralph/
+scripts/
 tasks/
 
 # ----- Distribution -----
