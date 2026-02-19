@@ -171,3 +171,10 @@ setup() {
   run sanitize_for_filename "example.com."
   assert_output "example.com"
 }
+
+# ---------- verify_file_integrity (removed in v3.2.4) ----------
+
+@test "verify_file_integrity is removed (dead code referenced gpg)" {
+  run type -t verify_file_integrity 2>/dev/null
+  assert_failure
+}

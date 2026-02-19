@@ -583,26 +583,6 @@ create_secure_temp() {
   echo "$temp_dir"
 }
 
-# Verify file integrity (basic check)
-verify_file_integrity() {
-  local file="$1"
-  local expected_type="${2:-}"
-
-  [[ ! -f "$file" ]] && return 1
-  [[ ! -s "$file" ]] && return 1  # Empty file
-
-  case "$expected_type" in
-    gzip)
-      gzip -t "$file" 2>/dev/null || return 1
-      ;;
-    gpg)
-      file "$file" 2>/dev/null | grep -qi "gpg\|pgp\|encrypted" || return 1
-      ;;
-  esac
-
-  return 0
-}
-
 # Safe file write (atomic)
 safe_write_file() {
   local target="$1"
