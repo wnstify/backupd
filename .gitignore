@@ -78,6 +78,7 @@ scratch/
 .audit/
 scripts/
 tasks/
+docs/
 
 # ----- Distribution -----
 dist/
@@ -115,9 +116,6 @@ progress.txt
 # ----- Test Artifacts (not tracked) -----
 CODEBASE-HEALTH-REPORT.md
 COMPREHENSIVE-TEST-SUMMARY.md
-# Allow tests/smoke_test.sh for CI
 !tests/
-tests/*
-!tests/smoke_test.sh
 SHA256SUMS
 CLAUDE.md
