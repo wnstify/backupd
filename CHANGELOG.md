@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.3] - 2026-02-19
+
+### Added
+
+- **Comprehensive Test Suite** — 291 automated tests using bats-core
+  - 155 unit tests covering all 11 library modules (core, exitcodes, crypto, logging, debug, config, jobs, scheduler, updater, history, cli_parsing)
+  - 136 integration tests covering all 11 command areas (backup, restore, verify, status, schedule, jobs, logs, history, notifications, updater, cli)
+  - Test runner entry point: `tests/run-tests.sh` with `--syntax`, `--unit`, `--integration`, `--all`
+  - bats-core, bats-assert, bats-support via git submodules
+  - `.gitattributes` excludes tests from release tarballs
+
+- **CI/CD Pipeline** — GitHub Actions for automated testing and releases
+  - `ci.yml` — Runs syntax checks + unit tests on every push to develop/main
+  - `release.yml` — Automated release on `v*` tag push: tests, tarball, SHA256SUMS, GitHub release, SLSA attestation via Sigstore (`actions/attest-build-provenance@v3`)
+  - Replaces manual release steps 5–9 with fully automated pipeline
+
+---
+
 ## [3.2.2] - 2026-01-22
 
 ### Fixed
