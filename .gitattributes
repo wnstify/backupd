@@ -24,3 +24,7 @@ CLAUDE.md          export-ignore
 # README.md, USAGE.md, CHANGELOG.md, LICENSE, DISCLAIMER.md, SECURITY.md → included
 # DEBUG.md → included (useful for troubleshooting)
 docs/              export-ignore
+
+# ----- Testing -----
+tests/             export-ignore
+.gitmodules        export-ignore
