@@ -72,3 +72,14 @@ setup() {
   assert_output "3"
   rm -rf "$tmpdir"
 }
+
+# ---------- store_secret() atomic write pattern ----------
+
+@test "store_secret uses atomic write (temp + mv pattern)" {
+  # Verify the source code uses mktemp + mv pattern, not direct write
+  local crypto_src="${BATS_TEST_DIRNAME}/../../lib/crypto.sh"
+  # Check that store_secret contains mktemp (atomic write)
+  run grep -A 20 '^store_secret()' "$crypto_src"
+  assert_output --partial "mktemp"
+  assert_output --partial 'mv "'
+}

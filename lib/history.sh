@@ -33,7 +33,7 @@ record_history() {
   [[ $duration_seconds -lt 0 ]] && duration_seconds=0
 
   # Escape all JSON string values
-  escape_json() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; echo "$s"; }
+  escape_json() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; s="${s//$'\t'/\\t}"; s="${s//$'\r'/\\r}"; echo "$s"; }
   job_name=$(escape_json "$job_name")
   snapshot_id=$(escape_json "$snapshot_id")
   hostname=$(escape_json "$hostname")

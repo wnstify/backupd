@@ -82,6 +82,7 @@ backup_database_stdin() {
 
   local restic_args=(
     -r "$repo"
+    --retry-lock "5m"
     backup
     --stdin
     --stdin-filename "${db_name}.sql"
@@ -111,6 +112,7 @@ backup_files() {
 
   local restic_args=(
     -r "$repo"
+    --retry-lock "5m"
     backup "$source_path"
     --tag "files"
     --tag "site:${site_name}"
@@ -140,6 +142,7 @@ backup_with_tags() {
 
   local restic_args=(
     -r "$repo"
+    --retry-lock "5m"
     backup "$source_path"
     --host "$hostname"
   )
@@ -164,10 +167,10 @@ restore_database() {
 
   if [[ -n "$db_filename" ]]; then
     # Dump specific file from snapshot
-    RESTIC_PASSWORD="$password" restic -r "$repo" dump "$snapshot_id" "/$db_filename" > "$target_file"
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m dump "$snapshot_id" "/$db_filename" > "$target_file"
   else
     # Dump root (for stdin backups, the file is at /)
-    RESTIC_PASSWORD="$password" restic -r "$repo" dump "$snapshot_id" / > "$target_file"
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m dump "$snapshot_id" / > "$target_file"
   fi
 }
 
@@ -182,6 +185,7 @@ restore_files() {
 
   local restic_args=(
     -r "$repo"
+    --retry-lock "5m"
     restore "$snapshot_id"
     --target "$target_path"
   )
@@ -200,7 +204,7 @@ restore_files_in_place() {
   local password="$2"
   local snapshot_id="$3"
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" restore "$snapshot_id" --target /
+  RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m restore "$snapshot_id" --target /
 }
 
 # ---------- Retention Operations ----------
@@ -218,6 +222,7 @@ apply_retention() {
 
   local restic_args=(
     -r "$repo"
+    --retry-lock "5m"
     forget
     --keep-daily "$keep_daily"
     --keep-weekly "$keep_weekly"
@@ -247,6 +252,7 @@ apply_retention_days() {
 
   local restic_args=(
     -r "$repo"
+    --retry-lock "5m"
     forget
     --keep-within "${keep_days}d"
     --prune
@@ -271,9 +277,9 @@ prune_repo() {
   local json_output="${3:-false}"
 
   if [[ "$json_output" == "true" ]]; then
-    RESTIC_PASSWORD="$password" restic -r "$repo" prune --json
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m prune --json
   else
-    RESTIC_PASSWORD="$password" restic -r "$repo" prune
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m prune
   fi
 }
 
@@ -287,9 +293,9 @@ verify_quick() {
   local json_output="${3:-false}"
 
   if [[ "$json_output" == "true" ]]; then
-    RESTIC_PASSWORD="$password" restic -r "$repo" check --json 2>&1
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m check --json 2>&1
   else
-    RESTIC_PASSWORD="$password" restic -r "$repo" check 2>&1
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m check 2>&1
   fi
 }
 
@@ -301,9 +307,9 @@ verify_full() {
   local json_output="${3:-false}"
 
   if [[ "$json_output" == "true" ]]; then
-    RESTIC_PASSWORD="$password" restic -r "$repo" check --read-data --json 2>&1
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m check --read-data --json 2>&1
   else
-    RESTIC_PASSWORD="$password" restic -r "$repo" check --read-data 2>&1
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m check --read-data 2>&1
   fi
 }
 
@@ -314,7 +320,7 @@ verify_partial() {
   local password="$2"
   local percentage="${3:-10}"
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" check --read-data-subset "${percentage}%" 2>&1
+  RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m check --read-data-subset "${percentage}%" 2>&1
 }
 
 # ---------- Snapshot Listing ----------
@@ -327,9 +333,9 @@ list_snapshots() {
   local tag_filter="${3:-}"
 
   if [[ -n "$tag_filter" ]]; then
-    RESTIC_PASSWORD="$password" restic -r "$repo" snapshots --tag "$tag_filter" --json
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m snapshots --tag "$tag_filter" --json
   else
-    RESTIC_PASSWORD="$password" restic -r "$repo" snapshots --json
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m snapshots --json
   fi
 }
 
@@ -340,9 +346,9 @@ list_snapshots_human() {
   local tag_filter="${3:-}"
 
   if [[ -n "$tag_filter" ]]; then
-    RESTIC_PASSWORD="$password" restic -r "$repo" snapshots --tag "$tag_filter"
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m snapshots --tag "$tag_filter"
   else
-    RESTIC_PASSWORD="$password" restic -r "$repo" snapshots
+    RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m snapshots
   fi
 }
 
@@ -382,7 +388,7 @@ list_snapshot_files() {
   local snapshot_id="$3"
   local path="${4:-/}"
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" ls "$snapshot_id" "$path"
+  RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m ls "$snapshot_id" "$path"
 }
 
 # ---------- Statistics ----------
@@ -392,7 +398,7 @@ get_repo_stats() {
   local repo="$1"
   local password="$2"
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" stats --json
+  RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m stats --json
 }
 
 # Get repository statistics (human-readable)
@@ -400,7 +406,7 @@ get_repo_stats_human() {
   local repo="$1"
   local password="$2"
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" stats
+  RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m stats
 }
 
 # Get diff between two snapshots
@@ -410,7 +416,7 @@ get_snapshot_diff() {
   local snapshot_a="$3"
   local snapshot_b="$4"
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" diff "$snapshot_a" "$snapshot_b"
+  RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m diff "$snapshot_a" "$snapshot_b"
 }
 
 # ---------- Utility Functions ----------
@@ -469,7 +475,7 @@ run_restic() {
   local password="$2"
   shift 2
 
-  RESTIC_PASSWORD="$password" restic -r "$repo" "$@"
+  RESTIC_PASSWORD="$password" restic -r "$repo" --retry-lock 5m "$@"
 }
 
 # ---------- Caching ----------

@@ -261,7 +261,15 @@ store_secret() {
   chattr -i "$secrets_dir" 2>/dev/null || true
   chattr -i "$secrets_dir/$secret_name" 2>/dev/null || true
 
-  printf '%s' "$secret_value" | openssl enc -aes-256-cbc -pbkdf2 -iter "$iterations" -salt -pass "pass:$key" -base64 > "$secrets_dir/$secret_name"
+  local temp_secret
+  temp_secret=$(mktemp "$secrets_dir/.tmp.XXXXXX")
+  if printf '%s' "$secret_value" | openssl enc -aes-256-cbc -pbkdf2 -iter "$iterations" -salt -pass "pass:$key" -base64 > "$temp_secret" && [[ -s "$temp_secret" ]]; then
+    mv "$temp_secret" "$secrets_dir/$secret_name"
+  else
+    rm -f "$temp_secret"
+    log_error "Failed to encrypt secret: $secret_name"
+    return 1
+  fi
 
   chmod 600 "$secrets_dir/$secret_name"
   if ! chattr +i "$secrets_dir/$secret_name" 2>/dev/null; then

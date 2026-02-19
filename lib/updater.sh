@@ -109,6 +109,7 @@ version_compare() {
 
   # Split versions into components
   local IFS='.'
+  # shellcheck disable=SC2206  # Intentional: word splitting to populate arrays
   local i v1_parts=($v1) v2_parts=($v2)
 
   # Compare each component
@@ -833,6 +834,58 @@ do_dev_update() {
   print_success "All files downloaded"
   echo
 
+  # Validate downloaded files BEFORE installing
+  print_info "Validating downloaded files..."
+
+  # Check shebang on all .sh files
+  for check_file in "${temp_dir}/${main_script}" "${temp_dir}"/lib/*.sh; do
+    [[ -f "$check_file" ]] || continue
+    local first_line
+    first_line=$(head -1 "$check_file")
+    if [[ "$first_line" != "#!/usr/bin/env bash" && "$first_line" != "#!/bin/bash" ]]; then
+      print_error "Invalid shebang in $(basename "$check_file"): $first_line"
+      print_error "File may be corrupted or truncated"
+      rm -rf "$temp_dir"
+      press_enter_to_continue
+      return 1
+    fi
+  done
+
+  # Minimum size check (catches truncated downloads)
+  for check_file in "${temp_dir}"/lib/*.sh; do
+    [[ -f "$check_file" ]] || continue
+    local file_size
+    file_size=$(stat -c%s "$check_file" 2>/dev/null || echo 0)
+    if [[ "$file_size" -lt 100 ]]; then
+      print_error "File too small ($(basename "$check_file"): ${file_size} bytes)"
+      print_error "Download may be truncated"
+      rm -rf "$temp_dir"
+      press_enter_to_continue
+      return 1
+    fi
+  done
+
+  # Syntax check on temp files (before install, not after)
+  for check_file in "${temp_dir}"/lib/*.sh; do
+    [[ -f "$check_file" ]] || continue
+    if ! bash -n "$check_file" 2>/dev/null; then
+      print_error "Syntax error in $(basename "$check_file")"
+      rm -rf "$temp_dir"
+      press_enter_to_continue
+      return 1
+    fi
+  done
+
+  if ! bash -n "${temp_dir}/${main_script}" 2>/dev/null; then
+    print_error "Syntax error in ${main_script}"
+    rm -rf "$temp_dir"
+    press_enter_to_continue
+    return 1
+  fi
+
+  print_success "All files validated"
+  echo
+
   # Backup current version
   # BUG-005 FIX: Check backup return value before proceeding
   if ! backup_current_version; then
@@ -854,26 +907,6 @@ do_dev_update() {
     cp "${temp_dir}/${lib_file}" "${SCRIPT_DIR}/${lib_file}"
     chmod +x "${SCRIPT_DIR}/${lib_file}"
   done
-
-  # BUG-003+016 FIX: Check all lib files for syntax errors before main script
-  for lib_file in "${SCRIPT_DIR}"/lib/*.sh; do
-    if [[ -f "$lib_file" ]] && ! bash -n "$lib_file" 2>/dev/null; then
-      print_error "Syntax error in $(basename "$lib_file"), rolling back..."
-      rollback_update
-      rm -rf "$temp_dir"
-      press_enter_to_continue
-      return 1
-    fi
-  done
-
-  # Basic syntax check for main script
-  if ! bash -n "${SCRIPT_DIR}/backupd.sh" 2>/dev/null; then
-    print_error "Syntax error in updated script, rolling back..."
-    rollback_update
-    rm -rf "$temp_dir"
-    press_enter_to_continue
-    return 1
-  fi
 
   # Cleanup
   rm -rf "$temp_dir"

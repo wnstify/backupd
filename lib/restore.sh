@@ -224,7 +224,18 @@ AUTHEOF
 
     echo "Importing database..."
     if $DB_IMPORT "${MYSQL_ARGS[@]}" < "$temp_sql" 2>&1; then
-      print_success "Database restored successfully"
+      # Post-restore verification: check tables exist
+      local safe_db_name="${db_name//\'/}"
+      local table_count
+      table_count=$($DB_IMPORT "${MYSQL_ARGS[@]}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$safe_db_name'" 2>/dev/null || echo "")
+      table_count=$(echo "$table_count" | tr -d '[:space:]')
+      if [[ -n "$table_count" && "$table_count" -gt 0 ]]; then
+        print_success "Database restored successfully ($table_count tables verified)"
+      elif [[ "$db_name" == "unknown" ]]; then
+        print_success "Database restored successfully"
+      else
+        print_warning "Database imported but no tables found in '$db_name'"
+      fi
     else
       print_error "Database import failed"
     fi
@@ -253,7 +264,16 @@ inline_restore_files() {
   echo "Restoring files to $target_path..."
   local restore_output
   if restore_output=$(RESTIC_PASSWORD="$password" restic -r "$repo" restore "$snapshot_id" --target "$target_path" 2>&1); then
-    print_success "Files restored successfully to $target_path"
+    # Post-restore verification: check files exist (bounded to avoid slow traversal on large restores)
+    local file_count
+    file_count=$(find "$target_path" -maxdepth 3 -type f 2>/dev/null | head -100 | wc -l)
+    if [[ "$file_count" -gt 0 ]]; then
+      local count_suffix=""
+      [[ "$file_count" -ge 100 ]] && count_suffix="+"
+      print_success "Files restored successfully to $target_path (${file_count}${count_suffix} files verified)"
+    else
+      print_warning "Restore completed but no files found in $target_path"
+    fi
   else
     # Sanitize output before displaying (hide sensitive paths)
     print_error "Files restore failed"

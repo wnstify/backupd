@@ -69,3 +69,35 @@ setup() {
   run version_compare "v3.2.2" "v3.2.2"
   assert_success
 }
+
+# ---------- do_dev_update validation order ----------
+
+@test "do_dev_update validates temp files before copying to install dir" {
+  local updater_src="${BATS_TEST_DIRNAME}/../../lib/updater.sh"
+  # Extract do_dev_update function body
+  local body
+  body=$(sed -n '/^do_dev_update()/,/^}/p' "$updater_src")
+
+  # Find line numbers of key operations within the function
+  local validate_line copy_line
+  validate_line=$(echo "$body" | grep -n 'bash -n.*temp_dir' | head -1 | cut -d: -f1)
+  copy_line=$(echo "$body" | grep -n 'cp.*temp_dir.*SCRIPT_DIR' | head -1 | cut -d: -f1)
+
+  # Validation must come before copy
+  [[ -n "$validate_line" ]] || { echo "No bash -n on temp_dir found"; return 1; }
+  [[ -n "$copy_line" ]] || { echo "No cp from temp_dir found"; return 1; }
+  [[ "$validate_line" -lt "$copy_line" ]] || {
+    echo "Validation (line $validate_line) must come before copy (line $copy_line)"
+    return 1
+  }
+}
+
+@test "do_dev_update validates shebang on downloaded files" {
+  local updater_src="${BATS_TEST_DIRNAME}/../../lib/updater.sh"
+  local body
+  body=$(sed -n '/^do_dev_update()/,/^}/p' "$updater_src")
+  echo "$body" | grep -q "shebang\|#!/" || {
+    echo "No shebang validation found in do_dev_update"
+    return 1
+  }
+}

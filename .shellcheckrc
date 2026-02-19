@@ -1,0 +1,7 @@
+# ShellCheck configuration for backupd
+# https://github.com/koalaman/shellcheck/wiki/Ignore
+
+# SC1091: Not following sourced file — dynamic $LIB_DIR paths can't be resolved
+# SC2034: Variable appears unused — false positive for cross-module globals
+# SC2155: Declare and assign separately — codebase convention is local var=$(...)
+disable=SC1091,SC2034,SC2155

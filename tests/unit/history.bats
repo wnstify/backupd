@@ -53,3 +53,39 @@ setup() {
   run format_duration 1
   assert_output "1s"
 }
+
+# ---------- escape_json() ----------
+# escape_json is defined inside record_history() as an inner function.
+# We redefine the fixed version here to test the escaping logic directly.
+
+_escape_json() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; s="${s//$'\n'/\\n}"; s="${s//$'\t'/\\t}"; s="${s//$'\r'/\\r}"; echo "$s"; }
+
+@test "escape_json escapes backslash" {
+  run _escape_json 'path\to\file'
+  assert_output 'path\\to\\file'
+}
+
+@test "escape_json escapes double quotes" {
+  run _escape_json 'say "hello"'
+  assert_output 'say \"hello\"'
+}
+
+@test "escape_json escapes tabs" {
+  run _escape_json $'hello\tworld'
+  assert_output 'hello\tworld'
+}
+
+@test "escape_json escapes carriage return" {
+  run _escape_json $'line\r'
+  assert_output 'line\r'
+}
+
+@test "escape_json escapes newline" {
+  run _escape_json $'line1\nline2'
+  assert_output 'line1\nline2'
+}
+
+@test "escape_json handles mixed special chars" {
+  run _escape_json $'tab\there "quoted"\nnewline'
+  assert_output 'tab\there \"quoted\"\nnewline'
+}

@@ -583,6 +583,7 @@ view_notification_failures() {
     3)
       read -p "Clear notification failure log? (y/N): " confirm
       if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # shellcheck disable=SC2188  # Intentional: truncate file using redirection
         > "$fail_log"
         print_success "Notification failure log cleared"
       fi
