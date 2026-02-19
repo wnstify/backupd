@@ -78,6 +78,7 @@ scratch/
 .audit/
 scripts/
 tasks/
+docs/
 
 # ----- Distribution -----
 dist/
