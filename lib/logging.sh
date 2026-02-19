@@ -43,6 +43,7 @@ declare -a _LOG_FUNC_NAMES=()
 
 _log_level_name() {
   local level="$1"
+  # shellcheck disable=SC2254  # Intentional: match against variable values, not literals
   case "$level" in
     $LOG_LEVEL_ERROR) echo "ERROR" ;;
     $LOG_LEVEL_WARN)  echo "WARN" ;;

@@ -16,5 +16,11 @@ jobs:
       - name: Syntax check
         run: ./tests/run-tests.sh --syntax
 
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: ShellCheck
+        run: shellcheck -x -s bash -S warning backupd.sh lib/*.sh
+
       - name: Unit tests
         run: ./tests/run-tests.sh --unit

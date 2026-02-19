@@ -952,6 +952,7 @@ cli_verify_full() {
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
 
   temp_dir="$(mktemp -d)"
+  # shellcheck disable=SC2064  # Intentional: expand $temp_dir at trap-set time
   trap "rm -rf '$temp_dir'" RETURN
 
   # Verify database backups
@@ -1034,6 +1035,7 @@ cli_verify_full_json() {
   rclone_files_path="$(get_config_value 'RCLONE_FILES_PATH')"
 
   temp_dir="$(mktemp -d)"
+  # shellcheck disable=SC2064  # Intentional: expand $temp_dir at trap-set time
   trap "rm -rf '$temp_dir'" RETURN
 
   # Verify database backups

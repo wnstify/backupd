@@ -109,6 +109,7 @@ version_compare() {
 
   # Split versions into components
   local IFS='.'
+  # shellcheck disable=SC2206  # Intentional: word splitting to populate arrays
   local i v1_parts=($v1) v2_parts=($v2)
 
   # Compare each component

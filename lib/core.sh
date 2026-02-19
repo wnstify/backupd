@@ -918,6 +918,7 @@ install_rclone_verified() {
 
   local temp_dir
   temp_dir=$(mktemp -d)
+  # shellcheck disable=SC2064  # Intentional: expand $temp_dir at trap-set time
   trap "rm -rf '$temp_dir'" RETURN
 
   # Download the archive (uses download_to_file for curl/wget fallback)
