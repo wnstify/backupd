@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.4] - 2026-02-19
+
+### Fixed
+
+- **Atomic writes in `store_secret()`** — Replaced direct `openssl enc > target` with temp file + verify + atomic `mv` pattern. Prevents secret file corruption from interrupted writes (`lib/crypto.sh`)
+- **JSON escaping in history** — Added `\t` and `\r` escaping to `escape_json()`. Prevents invalid JSONL records when backup messages contain tabs or carriage returns (`lib/history.sh`)
+- **Dev update validation order** — Moved shebang check, minimum size check, and `bash -n` syntax validation to run before install (not after). Failed downloads are now rejected before overwriting the running installation (`lib/updater.sh`)
+- **Restic lock contention** — Added `--retry-lock 5m` to all 19 lock-acquiring restic operations. Auto-waits for active locks and auto-removes stale locks from dead processes (`lib/restic.sh`)
+
+### Added
+
+- **Post-restore verification** — Database restore now queries `information_schema` to verify table count after import. File restore counts files in target path (bounded to prevent slow traversal on large sites). Both report as non-blocking warnings (`lib/restore.sh`)
+- **ShellCheck in CI** — Added `shellcheck -x -s bash -S warning` static analysis step to CI pipeline (`.github/workflows/ci.yml`)
+- **Version-tag validation in release pipeline** — Release now fails if git tag version doesn't match `VERSION` in backupd.sh (`.github/workflows/release.yml`)
+- **14 new unit tests** — Regression tests for atomic writes, JSON escaping, restic retry-lock, post-restore verification, dev update validation, and dead code removal (169 total, up from 155)
+
+### Removed
+
+- **Dead `verify_file_integrity()` function** — Referenced gpg which was replaced by restic in v3.0. Zero callers confirmed (`lib/core.sh`)
+
+---
+
 ## [3.2.3] - 2026-02-19
 
 ### Added
@@ -1563,6 +1585,8 @@ New environment variables supported for non-interactive operation:
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 3.2.4 | 2026-02-19 | Atomic writes, restic retry-lock, post-restore verification, ShellCheck CI, 14 new tests |
+| 3.2.3 | 2026-02-19 | **Test suite** (291 tests), CI/CD pipeline with SLSA attestation |
 | 3.2.2 | 2026-01-22 | **Cron fallback scheduler** (Alpine/Docker/RHEL6), 5 bug fixes |
 | 3.2.1 | 2026-01-09 | **Schedule auto-suggest**, bulk operations, 12 schedule templates |
 | 3.2.0 | 2026-01-09 | **Per-job scheduling CLI**, schedule validation, FlashPanel auto-detection |

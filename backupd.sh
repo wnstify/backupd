@@ -15,7 +15,7 @@
 # ============================================================================
 set -euo pipefail
 
-VERSION="3.2.3"
+VERSION="3.2.4"
 AUTHOR="Backupd"
 WEBSITE="https://backupd.io"
 INSTALL_DIR="/etc/backupd"
