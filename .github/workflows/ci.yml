@@ -1,8 +1,19 @@
 name: CI
 
 on:
+  pull_request:
+    branches: [develop, main]
   push:
     branches: [develop, main]
+
+# Read-only by default; jobs opt into more where they need it (Phase 1 hardening).
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -24,3 +35,30 @@ jobs:
 
       - name: Unit tests
         run: ./tests/run-tests.sh --unit
+
+  coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # Codecov OIDC upload — no CODECOV_TOKEN secret needed
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      # Reuse the same harness as local runs (single source of truth for kcov +
+      # deps). kcov is not in the Ubuntu repos, so it is built from a pinned tag
+      # inside the image; see tests/docker/Dockerfile.
+      - name: Build coverage harness (pinned kcov v43)
+        run: docker build -t backupd-ci tests/docker
+
+      - name: Measure coverage (unit + best-effort integration)
+        run: docker run --rm -v "$PWD":/src -w /src backupd-ci ./tests/run-tests.sh --coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ./coverage/cobertura.xml
+          fail_ci_if_error: false
