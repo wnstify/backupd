@@ -10,12 +10,16 @@ permissions:
   id-token: write
   attestations: write
 
+# Force JavaScript actions onto Node 24 (current LTS), ahead of GitHub's forced migration.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: true
 
@@ -30,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Extract version
         id: version
@@ -74,6 +78,6 @@ jobs:
             --latest
 
       - name: Attest tarball provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: "backupd-${{ steps.version.outputs.tag }}.tar.gz"

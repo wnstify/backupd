@@ -15,12 +15,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Force JavaScript actions (incl. codecov's transitive github-script) onto Node 24
+# (current LTS), ahead of GitHub's forced migration. Remove once all actions ship Node 24.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: true
 
@@ -43,7 +48,7 @@ jobs:
       id-token: write        # Codecov OIDC upload — no CODECOV_TOKEN secret needed
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: true
 
@@ -57,7 +62,7 @@ jobs:
         run: docker run --rm -v "$PWD":/src -w /src backupd-ci ./tests/run-tests.sh --coverage
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           use_oidc: true
           files: ./coverage/cobertura.xml
