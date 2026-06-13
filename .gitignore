@@ -63,6 +63,7 @@ desktop.ini
 *.code-workspace
 .claude
 .claude/*
+.Codex/
 CLAUDE_INDEX.md
 
 # ----- Testing -----
