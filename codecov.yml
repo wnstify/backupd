@@ -1,0 +1,27 @@
+# Codecov configuration for backupd
+# https://docs.codecov.com/docs/codecov-yaml
+#
+# Strategy (see CICD.md): gate PRs on PATCH coverage, keep the project-wide
+# number as a non-regressing floor. Whole-repo % is not a target here — much of
+# the code is heredoc-templated generated scripts, interactive menus, distro
+# branches, and a separate-process CLI, so a high absolute % is neither
+# achievable nor meaningful. New/changed code, however, must come with tests.
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto        # floor = last known coverage; only fails on regression
+        threshold: 1%        # tolerate small measurement noise
+    patch:
+      default:
+        target: 85%          # changed lines in a PR must be >= 85% covered
+        threshold: 0%
+
+comment:
+  layout: "condensed_header, diff, files, footer"
+  require_changes: true      # only comment on PRs that change coverage
+
+# Test code and vendored bats submodules must not count toward coverage.
+ignore:
+  - "tests/**"
