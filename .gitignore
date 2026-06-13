@@ -70,6 +70,7 @@ CLAUDE_INDEX.md
 test/
 # Keep smoke_test.sh for CI (negation below)
 test_*
+coverage/
 
 # ----- Development -----
 dev/
