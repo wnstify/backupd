@@ -123,3 +123,6 @@ COMPREHENSIVE-TEST-SUMMARY.md
 !tests/
 SHA256SUMS
 CLAUDE.md
+
+# ----- Knowledge Graph (graphify) -----
+graphify-out/
