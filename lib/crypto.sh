@@ -435,28 +435,3 @@ migrate_secrets() {
   echo "Migration complete!"
   return 0
 }
-
-# Check if migration is recommended
-migration_recommended() {
-  local secrets_dir="$1"
-  local current_version best_version
-
-  current_version="$(get_crypto_version "$secrets_dir")"
-  best_version="$(get_best_crypto_version)"
-
-  [[ "$current_version" -lt "$best_version" ]]
-}
-
-# Get migration recommendation message
-get_migration_recommendation() {
-  local secrets_dir="$1"
-  local current_version best_version
-
-  current_version="$(get_crypto_version "$secrets_dir")"
-  best_version="$(get_best_crypto_version)"
-
-  if [[ "$current_version" -lt "$best_version" ]]; then
-    echo "Encryption upgrade available: $(get_crypto_name "$current_version") → $(get_crypto_name "$best_version")"
-    echo "Run 'backupd --migrate-encryption' to upgrade"
-  fi
-}
