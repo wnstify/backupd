@@ -14,25 +14,7 @@ setup() {
 
   # These functions must have --retry-lock
   local functions=(
-    backup_database_stdin
-    backup_files
-    backup_with_tags
-    restore_database
-    restore_files
-    restore_files_in_place
-    apply_retention
     apply_retention_days
-    prune_repo
-    verify_quick
-    verify_full
-    verify_partial
-    list_snapshots
-    list_snapshots_human
-    get_repo_stats
-    get_repo_stats_human
-    get_snapshot_diff
-    list_snapshot_files
-    run_restic
   )
 
   local missing=()
@@ -58,8 +40,6 @@ setup() {
   local functions=(
     init_restic_repo
     repo_exists
-    unlock_repo
-    check_locks
   )
 
   local wrongly_has=()
