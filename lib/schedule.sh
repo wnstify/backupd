@@ -32,41 +32,6 @@ get_template_schedule() {
   [[ -n "$template" ]] && echo "$template" | cut -d'|' -f1
 }
 
-# BACKUPD-035: Get template display name by name
-# Usage: get_template_display "daily_2am"
-# Returns: Display name or empty if not found
-get_template_display() {
-  local name="$1"
-  local template="${SCHEDULE_TEMPLATES[$name]}"
-  [[ -n "$template" ]] && echo "$template" | cut -d'|' -f2
-}
-
-# BACKUPD-035: Get template description by name
-# Usage: get_template_description "daily_2am"
-# Returns: Description or empty if not found
-get_template_description() {
-  local name="$1"
-  local template="${SCHEDULE_TEMPLATES[$name]}"
-  [[ -n "$template" ]] && echo "$template" | cut -d'|' -f3
-}
-
-# BACKUPD-035: Detect template name from OnCalendar expression
-# Usage: detect_template_name "*-*-* 02:00:00"
-# Returns: Template name or empty if no match
-detect_template_name() {
-  local schedule="$1"
-  local name oncalendar
-
-  for name in "${!SCHEDULE_TEMPLATES[@]}"; do
-    oncalendar=$(echo "${SCHEDULE_TEMPLATES[$name]}" | cut -d'|' -f1)
-    if [[ "$oncalendar" == "$schedule" ]]; then
-      echo "$name"
-      return 0
-    fi
-  done
-  return 1
-}
-
 # BACKUPD-035: List all available templates
 # Usage: list_schedule_templates
 # Output: name|oncalendar|display|description (one per line)
