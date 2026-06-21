@@ -81,13 +81,6 @@ get_job_scripts_dir() {
   echo "$JOBS_DIR/$job_name/scripts"
 }
 
-# Get job config file path
-# Usage: config_file=$(get_job_config_file "production")
-get_job_config_file() {
-  local job_name="$1"
-  echo "$JOBS_DIR/$job_name/$JOB_CONFIG_FILE"
-}
-
 # ---------- Job Listing ----------
 
 # List all job names (one per line)
@@ -234,57 +227,6 @@ save_job_config() {
 
   echo "${key}=\"${value}\"" >> "$config_file"
   chmod 600 "$config_file"
-}
-
-# Validate job configuration has required fields
-# Usage: validate_job_config "production" || exit 1
-validate_job_config() {
-  local job_name="$1"
-  local errors=0
-
-  # Required fields
-  local required=("RCLONE_REMOTE")
-  local field
-
-  for field in "${required[@]}"; do
-    local value
-    value="$(get_job_config "$job_name" "$field")"
-    if [[ -z "$value" ]]; then
-      print_error "Job '$job_name' missing required config: $field"
-      ((errors++)) || true
-    fi
-  done
-
-  # At least one backup type must be enabled
-  local do_db do_files
-  do_db="$(get_job_config "$job_name" "DO_DATABASE")"
-  do_files="$(get_job_config "$job_name" "DO_FILES")"
-
-  if [[ "$do_db" != "true" && "$do_files" != "true" ]]; then
-    print_error "Job '$job_name' must have DO_DATABASE=true or DO_FILES=true"
-    ((errors++)) || true
-  fi
-
-  # Validate paths if specified
-  if [[ "$do_db" == "true" ]]; then
-    local db_path
-    db_path="$(get_job_config "$job_name" "RCLONE_DB_PATH")"
-    if [[ -z "$db_path" ]]; then
-      print_error "Job '$job_name' has DO_DATABASE=true but no RCLONE_DB_PATH"
-      ((errors++)) || true
-    fi
-  fi
-
-  if [[ "$do_files" == "true" ]]; then
-    local files_path
-    files_path="$(get_job_config "$job_name" "RCLONE_FILES_PATH")"
-    if [[ -z "$files_path" ]]; then
-      print_error "Job '$job_name' has DO_FILES=true but no RCLONE_FILES_PATH"
-      ((errors++)) || true
-    fi
-  fi
-
-  [[ $errors -eq 0 ]]
 }
 
 # ---------- Job CRUD Operations ----------
@@ -1089,25 +1031,4 @@ count_jobs() {
   done
 
   echo "$count"
-}
-
-# Get the default job name (or first available)
-# Usage: job=$(get_default_job)
-get_default_job() {
-  # If default job exists, use it
-  if job_exists "$DEFAULT_JOB_NAME"; then
-    echo "$DEFAULT_JOB_NAME"
-    return 0
-  fi
-
-  # Otherwise return first job
-  list_jobs | head -1
-}
-
-# Check if we're in multi-job mode (more than one job configured)
-# Usage: is_multi_job && echo "multiple jobs"
-is_multi_job() {
-  local count
-  count="$(count_jobs)"
-  [[ $count -gt 1 ]]
 }
