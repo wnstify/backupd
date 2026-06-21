@@ -180,37 +180,6 @@ pkg_install() {
     esac
 }
 
-# Get the install command hint for user-facing error messages
-get_install_hint() {
-    local package="$1"
-    local pm
-    pm=$(detect_package_manager)
-
-    case "$pm" in
-        apt)
-            echo "sudo apt install $package"
-            ;;
-        dnf)
-            echo "sudo dnf install $package"
-            ;;
-        yum)
-            echo "sudo yum install $package"
-            ;;
-        pacman)
-            echo "sudo pacman -S $package"
-            ;;
-        apk)
-            echo "sudo apk add $package"
-            ;;
-        zypper)
-            echo "sudo zypper install $package"
-            ;;
-        *)
-            echo "Install '$package' using your system's package manager"
-            ;;
-    esac
-}
-
 print_banner() {
     echo -e "${CYAN}"
     echo "╔═══════════════════════════════════════════════════════════╗"
