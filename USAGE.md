@@ -1216,40 +1216,8 @@ Next scheduled operations:
 With multi-job support, each history record includes which job performed the operation:
 
 ```bash
-# View history for specific job
+# View history for a specific job
 sudo backupd job show production    # Includes recent history
-
-# Filter history by job (programmatic)
-# In scripts, use the get_job_history function:
-source /etc/backupd/lib/history.sh
-get_job_history "production" "all" 20     # Last 20 ops for production job
-get_job_history "staging" "database" 10   # Last 10 DB backups for staging
-```
-
-**Job history summary:**
-
-```bash
-# Get summary statistics for all jobs (programmatic)
-source /etc/backupd/lib/history.sh
-get_history_by_jobs
-```
-
-Returns:
-```json
-{
-  "default": {
-    "total": 45,
-    "success": 43,
-    "failed": 2,
-    "last_backup": "2026-01-07T03:00:46+00:00"
-  },
-  "production": {
-    "total": 20,
-    "success": 20,
-    "failed": 0,
-    "last_backup": "2026-01-07T02:00:15+00:00"
-  }
-}
 ```
 
 ---
