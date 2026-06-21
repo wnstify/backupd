@@ -63,19 +63,6 @@ if [[ -z "${BACKUPD_TRAP_SET:-}" ]]; then
     BACKUPD_TRAP_SET=1
 fi
 
-# Helper to run a command and track its PID for cleanup
-# Usage: run_tracked_command restic check -r "$repo"
-run_tracked_command() {
-    "$@" &
-    local pid=$!
-    BACKUPD_CHILD_PIDS+=("$pid")
-    wait "$pid"
-    local exit_code=$?
-    # Remove PID from tracking array
-    BACKUPD_CHILD_PIDS=("${BACKUPD_CHILD_PIDS[@]/$pid/}")
-    return $exit_code
-}
-
 # ---------- Package Manager Functions ----------
 
 # Package manager detection (cached)
@@ -292,19 +279,6 @@ json_output() {
   echo "$1"
 }
 
-# Build simple JSON key-value pair - usage: json_kv "key" "value"
-json_kv() {
-  local key="$1"
-  local value="$2"
-  # Escape special characters in value
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  value="${value//$'\n'/\\n}"
-  value="${value//$'\r'/\\r}"
-  value="${value//$'\t'/\\t}"
-  printf '"%s": "%s"' "$key" "$value"
-}
-
 # Check if JSON output mode is enabled
 is_json_output() {
   [[ "${JSON_OUTPUT:-0}" -eq 1 ]]
@@ -429,54 +403,6 @@ validate_password() {
 
 # ---------- System Check Functions ----------
 
-# Check available disk space (in MB)
-check_disk_space() {
-  local path="$1"
-  local required_mb="${2:-1000}"  # Default 1GB
-
-  local available_mb
-  available_mb=$(df -m "$path" 2>/dev/null | awk 'NR==2 {print $4}')
-
-  if [[ -z "$available_mb" ]]; then
-    print_warning "Could not check disk space - proceeding anyway"
-    log_warn "df output could not be parsed for path: $path"
-    return 0
-  fi
-
-  if [[ "$available_mb" -lt "$required_mb" ]]; then
-    print_error "Insufficient disk space. Available: ${available_mb}MB, Required: ${required_mb}MB"
-    return 1
-  fi
-
-  return 0
-}
-
-# Check network connectivity (supports curl/wget fallback)
-# BACKUPD-007 FIX: Add wget fallback for systems without curl
-check_network() {
-  local host="${1:-1.1.1.1}"
-  local timeout="${2:-5}"
-
-  # Try curl first (ICMP often blocked on servers)
-  if command -v curl &>/dev/null; then
-    if curl -s --connect-timeout "$timeout" "https://www.google.com" &>/dev/null; then
-      return 0
-    fi
-  elif command -v wget &>/dev/null; then
-    if wget -q --timeout="$timeout" -O /dev/null "https://www.google.com" 2>/dev/null; then
-      return 0
-    fi
-  fi
-
-  # Fallback to ping
-  if ! ping -c 1 -W "$timeout" "$host" &>/dev/null; then
-    print_error "No network connectivity"
-    return 1
-  fi
-
-  return 0
-}
-
 # Download file with curl/wget fallback
 # Usage: download_to_file URL OUTPUT_FILE [TIMEOUT]
 # BACKUPD-007 FIX: Support both curl and wget for maximum compatibility
@@ -508,26 +434,6 @@ fetch_url() {
   else
     return 1
   fi
-}
-
-# ---------- MySQL Helper Functions ----------
-
-# Create MySQL credentials file (more secure than command line)
-create_mysql_auth_file() {
-  local user="$1"
-  local pass="$2"
-  local auth_file
-
-  auth_file="$(mktemp)"
-  chmod 600 "$auth_file"
-
-  cat > "$auth_file" << EOF
-[client]
-user=$user
-password=$pass
-EOF
-
-  echo "$auth_file"
 }
 
 # ---------- Logging Functions ----------
@@ -581,24 +487,6 @@ create_secure_temp() {
   chmod 700 "$temp_dir"
 
   echo "$temp_dir"
-}
-
-# Safe file write (atomic)
-safe_write_file() {
-  local target="$1"
-  local content="$2"
-  local temp_file
-
-  temp_file="$(mktemp "${target}.XXXXXXXXXX")"
-
-  if echo "$content" > "$temp_file" 2>/dev/null; then
-    chmod 600 "$temp_file"
-    mv "$temp_file" "$target"
-    return 0
-  else
-    rm -f "$temp_file"
-    return 1
-  fi
 }
 
 # ---------- Panel Detection Functions ----------
@@ -804,11 +692,6 @@ get_panel_info() {
   esac
 }
 
-# Get all panel keys
-get_all_panel_keys() {
-  echo "${!PANEL_DEFINITIONS[@]}" | tr ' ' '\n' | sort
-}
-
 # Count sites for a given pattern
 count_sites_for_pattern() {
   local pattern="$1"
@@ -819,60 +702,6 @@ count_sites_for_pattern() {
   done
 
   echo "$count"
-}
-
-# ---------- Site Naming Functions ----------
-
-# Get site name/URL from various app types
-get_site_name() {
-  local site_path="$1"
-  local owner="${2:-www-data}"
-  local name=""
-
-  # 1. WordPress: wp option get siteurl
-  if [[ -f "$site_path/wp-config.php" ]]; then
-    if su -l -s /bin/bash "$owner" -c "command -v wp >/dev/null 2>&1" 2>/dev/null; then
-      name="$(su -l -s /bin/bash "$owner" -c "cd '$site_path' && wp option get siteurl 2>/dev/null" 2>/dev/null || true)"
-    fi
-    if [[ -z "$name" ]]; then
-      name="$(grep -E "define\s*\(\s*['\"]WP_HOME['\"]" "$site_path/wp-config.php" 2>/dev/null | head -1 | sed -E "s/.*['\"]https?:\/\/([^'\"]+)['\"].*/https:\/\/\1/" || true)"
-    fi
-    [[ -n "$name" ]] && echo "$name" && return 0
-  fi
-
-  # 2. Laravel: APP_URL from .env
-  if [[ -f "$site_path/.env" ]] && [[ -f "$site_path/artisan" ]]; then
-    name="$(grep -E "^APP_URL=" "$site_path/.env" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" || true)"
-    [[ -n "$name" ]] && echo "$name" && return 0
-  fi
-
-  # 3. Node.js: name from package.json
-  if [[ -f "$site_path/package.json" ]]; then
-    name="$(grep -E '"name"\s*:' "$site_path/package.json" 2>/dev/null | head -1 | sed -E 's/.*"name"\s*:\s*"([^"]+)".*/\1/' || true)"
-    [[ -n "$name" ]] && echo "$name" && return 0
-  fi
-
-  # 4. Generic: try to extract from nginx/apache configs in common locations
-  # Check for server_name in nginx configs
-  if [[ -d "/etc/nginx/sites-enabled" ]]; then
-    local nginx_name
-    nginx_name="$(grep -rh "server_name" /etc/nginx/sites-enabled/ 2>/dev/null | grep -i "$(basename "$site_path")" | head -1 | awk '{print $2}' | tr -d ';' || true)"
-    [[ -n "$nginx_name" && "$nginx_name" != "_" ]] && echo "$nginx_name" && return 0
-  fi
-
-  # 5. Fallback: use folder name
-  echo "$(basename "$site_path")"
-}
-
-# Sanitize name for use as filename
-sanitize_for_filename() {
-  local s="$1"
-  s="$(echo -n "$s" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
-  s="${s//:\/\//__}"; s="${s//\//__}"
-  s="$(echo -n "$s" | sed -E 's/[^a-z0-9._-]+/_/g')"
-  s="${s%.}"
-  [[ -z "$s" ]] && s="unknown-site"
-  printf "%s" "$s"
 }
 
 # ---------- Dependency Installation ----------

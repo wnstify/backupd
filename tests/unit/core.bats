@@ -135,43 +135,6 @@ setup() {
   assert_failure
 }
 
-# ---------- sanitize_for_filename() ----------
-
-@test "sanitize_for_filename lowercases and preserves dots" {
-  run sanitize_for_filename "MyDomain.COM"
-  assert_output "mydomain.com"
-}
-
-@test "sanitize_for_filename replaces :// with __ and preserves dots" {
-  run sanitize_for_filename "https://example.com"
-  assert_output "https__example.com"
-}
-
-@test "sanitize_for_filename replaces slashes with __" {
-  run sanitize_for_filename "path/to/dir"
-  assert_output "path__to__dir"
-}
-
-@test "sanitize_for_filename removes whitespace" {
-  run sanitize_for_filename "my domain"
-  assert_output "mydomain"
-}
-
-@test "sanitize_for_filename replaces special chars with underscore" {
-  run sanitize_for_filename "site@host:8080"
-  assert_output "site_host_8080"
-}
-
-@test "sanitize_for_filename returns unknown-site for empty input" {
-  run sanitize_for_filename ""
-  assert_output "unknown-site"
-}
-
-@test "sanitize_for_filename removes trailing dots" {
-  run sanitize_for_filename "example.com."
-  assert_output "example.com"
-}
-
 # ---------- verify_file_integrity (removed in v3.2.4) ----------
 
 @test "verify_file_integrity is removed (dead code referenced gpg)" {
